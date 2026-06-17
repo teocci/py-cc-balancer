@@ -1,0 +1,52 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls *.md)",
+      "Bash(cat *.md)",
+      "Bash(.venv/Scripts/python -m wb *)",
+      "Bash(.venv/bin/python -m wb *)",
+      "Bash(xargs ls:*)",
+      "Bash(grep *)",
+      "Bash(xargs -I {} basename {})",
+      "Bash(python -c *)",
+      "Bash(.venv/Scripts/python -c *)",
+      "Bash(gh --version)",
+      "Bash(gh auth:*)",
+      "Bash(where gh:*)",
+      "Bash(/d/libs/gh/bin/gh.exe --version)",
+      "Bash(/d/libs/gh/bin/gh.exe auth:*)",
+      "Bash(/d/libs/gh/gh.exe --version)",
+      "Bash(/d/libs/gh/gh.exe auth:*)",
+      "Bash(/d/libs/gh/gh.exe workflow:*)",
+      "Bash(/d/libs/gh/gh.exe run:*)",
+      "Read(//d/libs/gh/**)",
+      "Read(//c/Users/teocci/.claude/plans/**)",
+      "Bash(git status:*)",
+      "Bash(git check-ignore:*)",
+      "Bash(git push:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git tag:*)",
+      "Bash(git log *)",
+      "Bash(git restore *)",
+      "Bash(git stash *)",
+      "Bash(git mv *)",
+      "Bash(git ls-remote *)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(echo \"exit=$?\")",
+      "Edit(/.claude/skills/*)",
+      "Edit(/.claude/skills/phase-complete/**)",
+      "Bash(wc:*)",
+      "Bash(wb version *)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "Bash(.venv/Scripts/python)",
+      "Bash(Select-Object Name)",
+      "Bash(ConvertTo-Json)"
+    ],
+    "additionalDirectories": [
+      "d:\\teocci\\code\\python\\py-cc-balanacer\\.claude\\skills",
+      "d:\\teocci\\code\\python\\py-cc-balanacer"
+    ]
+  }
+}
