@@ -1,0 +1,35 @@
+[build-system]
+requires = ['setuptools>=68']
+build-backend = 'setuptools.build_meta'
+
+[project]
+name = 'ccbalancer'
+description = 'Agent-driven crypto portfolio rebalancer CLI.'
+requires-python = '>=3.11'
+dynamic = ['version']
+dependencies = [
+    'ccxt==4.4.94',
+    'python-dotenv==1.0.1',
+]
+
+[project.optional-dependencies]
+dev = [
+    'pytest==8.3.5',
+    'pytest-mock==3.14.0',
+]
+packaging = [
+    'pyinstaller==6.11.1',
+]
+
+[project.scripts]
+ccbalancer = 'ccbalancer.cli:main'
+
+[tool.setuptools.dynamic]
+version = {attr = 'ccbalancer.__version__'}
+
+[tool.setuptools.packages.find]
+where = ['src']
+
+[tool.pytest.ini_options]
+testpaths = ['tests']
+addopts = '-q'
