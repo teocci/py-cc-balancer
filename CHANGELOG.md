@@ -19,3 +19,8 @@ All notable changes to this project are documented here. Format follows
   (`load_markets`, `fetch_balance`, `fetch_ticker`, `fetch_open_orders`, `create_order`,
   `cancel_order`) with sandbox toggle and ccxt→domain error translation; `FakeExchangeStore`
   test double in `conftest.py`. Only module that touches the network.
+- Phase 5: state store + portfolio snapshots — `stores/state_store.py` (per-pair upsert
+  into `state.json`, append-only `history.jsonl`, atomic writes, `StateError` on corrupt
+  files), `utils/timeutil.py` (UTC ISO-8601 `now_iso`/`parse_iso`/`hours_between`),
+  `utils/money.py` (Decimal-backed `precision_to_decimals`/`round_amount`/`notional`), and
+  `managers/portfolio_manager.py` (balances + tickers + state → `PairSnapshot`, batched fetch).
