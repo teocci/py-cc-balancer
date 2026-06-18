@@ -105,6 +105,29 @@ class StateStore:
         self.save(state)
         self.append_event(event)
 
+    def load_history(self) -> list[dict[str, object]]:
+        '''Return every ``history.jsonl`` event as a dict, in append order.
+
+        Records are returned raw (not parsed into models) so the audit reader
+        tolerates older log schemas. Empty if the file is absent.
+
+        Raises:
+            StateError: If the file is unreadable or contains a malformed line.
+        '''
+        if not self.history_path.is_file():
+            return []
+        try:
+            text = self.history_path.read_text(encoding='utf-8')
+        except OSError as exc:
+            raise StateError(f'Cannot read history {self.history_path}: {exc}') from exc
+        return [self._parse_event(line) for line in text.splitlines() if line.strip()]
+
+    def _parse_event(self, line: str) -> dict[str, object]:
+        try:
+            return json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise StateError(f'Corrupt history record in {self.history_path}: {exc}') from exc
+
     def _from_dict(self, entry: dict[str, object]) -> RebalanceState:
         try:
             return RebalanceState(

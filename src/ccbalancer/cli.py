@@ -16,6 +16,7 @@ from ccbalancer import __version__
 from ccbalancer import config as config_mod
 from ccbalancer.config import Defaults
 from ccbalancer.constants import (
+    DECISION_LOG_FILENAME,
     HISTORY_FILENAME,
     OHLCV_DIRNAME,
     PORTFOLIO_FILENAME,
@@ -34,6 +35,7 @@ from ccbalancer.managers.indicators_manager import IndicatorsManager
 from ccbalancer.managers.portfolio_manager import PortfolioManager
 from ccbalancer.managers.rebalance_manager import RebalanceManager
 from ccbalancer.models import PairConfig
+from ccbalancer.stores.decision_store import DecisionStore
 from ccbalancer.stores.exchange import ExchangeStore
 from ccbalancer.stores.market_cache import MarketCache
 from ccbalancer.stores.portfolio_store import PortfolioStore, pair_to_dict
@@ -56,11 +58,23 @@ _EXIT_BY_ERROR: dict[type[AppError], ExitCode] = {
 }
 
 
+# Commands grouped by side effect, shown in `--help` so an agent can tell read
+# (live data, no writes) from write (mutates/places orders) from audit (local
+# logs only, no network).
+_COMMAND_TAXONOMY = '''command categories:
+  read   (live data, no side effects):  status, plan, analyze, indicator list, version
+  write  (mutate state / place orders):  pair, indicator set, config
+  audit  (local logs only, no network):  decisions, history, export'''
+
+
 def build_parser() -> argparse.ArgumentParser:
     '''Build the top-level argument parser with all commands.'''
     common = _common_flags()
     parser = argparse.ArgumentParser(
-        prog='ccbalancer', description='Agent-driven crypto portfolio rebalancer.'
+        prog='ccbalancer',
+        description='Agent-driven crypto portfolio rebalancer.',
+        epilog=_COMMAND_TAXONOMY,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest='command', metavar='<command>')
     subparsers.add_parser('version', parents=[common], help='Print the ccbalancer version.')
@@ -70,7 +84,20 @@ def build_parser() -> argparse.ArgumentParser:
     _add_indicator_command(subparsers, common)
     _add_config_command(subparsers, common)
     _add_pair_command(subparsers, common)
+    _add_audit_commands(subparsers, common)
     return parser
+
+
+def _add_audit_commands(subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
+    subparsers.add_parser(
+        'decisions', parents=[common], help='Replay the local decision log (no network).'
+    )
+    subparsers.add_parser(
+        'history', parents=[common], help='Replay the local rebalance history (no network).'
+    )
+    subparsers.add_parser(
+        'export', parents=[common], help='Export local decision and history logs as JSON.'
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -173,6 +200,12 @@ def _dispatch(args: argparse.Namespace) -> ExitCode:
         return _cmd_config(args)
     if args.command == 'pair':
         return _cmd_pair(args)
+    if args.command == 'decisions':
+        return _cmd_decisions(args)
+    if args.command == 'history':
+        return _cmd_history(args)
+    if args.command == 'export':
+        return _cmd_export(args)
     return ExitCode.OK
 
 
@@ -182,7 +215,7 @@ def _cmd_version(args: argparse.Namespace) -> ExitCode:
 
 
 def _cmd_status(args: argparse.Namespace) -> ExitCode:
-    pairs, portfolio_mgr, rebalance_mgr, meta = _read_context(args)
+    pairs, portfolio_mgr, rebalance_mgr, _decisions, meta = _read_context(args)
     snapshots = portfolio_mgr.snapshots(pairs)
     rows = [
         (snapshot, rebalance_mgr.decide(pair, snapshot, now=meta['generated_at']))
@@ -194,15 +227,28 @@ def _cmd_status(args: argparse.Namespace) -> ExitCode:
 
 
 def _cmd_plan(args: argparse.Namespace) -> ExitCode:
-    pairs, portfolio_mgr, rebalance_mgr, meta = _read_context(args)
+    pairs, portfolio_mgr, rebalance_mgr, decision_store, meta = _read_context(args)
     snapshots = portfolio_mgr.snapshots(pairs)
     decisions = [
         rebalance_mgr.decide(pair, snapshot, now=meta['generated_at'])
         for pair, snapshot in zip(pairs, snapshots)
     ]
+    _record_decisions(decision_store, decisions, meta)
     payload = render.plan_response(decisions, meta)
     _emit(args, payload, render.plan_lines(decisions) or ['(no pairs configured)'])
     return ExitCode.OK
+
+
+def _record_decisions(store: DecisionStore, decisions: list, meta: dict[str, object]) -> None:
+    '''Append one decision-memory record per pair (the `plan` audit trail).'''
+    for decision in decisions:
+        store.append_decision(
+            decision,
+            ts=str(meta['generated_at']),
+            exchange=str(meta['exchange']),
+            testnet=bool(meta['testnet']),
+            command='plan',
+        )
 
 
 def _cmd_analyze(args: argparse.Namespace) -> ExitCode:
@@ -283,7 +329,7 @@ def _parse_assignments(name: str, assignments: list[str]) -> dict[str, object]:
 
 def _read_context(
     args: argparse.Namespace,
-) -> tuple[list[PairConfig], PortfolioManager, RebalanceManager, dict[str, object]]:
+) -> tuple[list[PairConfig], PortfolioManager, RebalanceManager, DecisionStore, dict[str, object]]:
     '''Resolve config and stores into the managers a read command needs.'''
     config = config_mod.load_config(args.config, args.exchange, args.testnet)
     portfolio = PortfolioStore(config.app_dir / PORTFOLIO_FILENAME)
@@ -291,8 +337,9 @@ def _read_context(
     state = StateStore(config.app_dir / STATE_FILENAME, config.app_dir / HISTORY_FILENAME)
     portfolio_mgr = PortfolioManager(_exchange_store(config), state)
     rebalance_mgr = RebalanceManager.from_config(config)
+    decision_store = DecisionStore(config.app_dir / DECISION_LOG_FILENAME)
     meta = {'exchange': config.exchange, 'testnet': config.testnet, 'generated_at': now_iso()}
-    return pairs, portfolio_mgr, rebalance_mgr, meta
+    return pairs, portfolio_mgr, rebalance_mgr, decision_store, meta
 
 
 def _exchange_store(config: config_mod.AppConfig) -> ExchangeStore:
@@ -386,6 +433,44 @@ def _cmd_pair_remove(args: argparse.Namespace) -> ExitCode:
     symbol = args.symbol.upper()
     _emit(args, {'command': 'pair remove', 'symbol': symbol}, [f'Removed {symbol}'])
     return ExitCode.OK
+
+
+def _cmd_decisions(args: argparse.Namespace) -> ExitCode:
+    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    store = DecisionStore(config.app_dir / DECISION_LOG_FILENAME)
+    records = _filter_by_pair(store.load(), args.pair)
+    payload = render.decisions_response(records, now_iso())
+    _emit(args, payload, render.decisions_lines(records) or ['(no decisions logged)'])
+    return ExitCode.OK
+
+
+def _cmd_history(args: argparse.Namespace) -> ExitCode:
+    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    state = StateStore(config.app_dir / STATE_FILENAME, config.app_dir / HISTORY_FILENAME)
+    events = _filter_by_pair(state.load_history(), args.pair)
+    payload = render.history_response(events, now_iso())
+    _emit(args, payload, render.history_lines(events) or ['(no history logged)'])
+    return ExitCode.OK
+
+
+def _cmd_export(args: argparse.Namespace) -> ExitCode:
+    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    decisions = DecisionStore(config.app_dir / DECISION_LOG_FILENAME).load()
+    state = StateStore(config.app_dir / STATE_FILENAME, config.app_dir / HISTORY_FILENAME)
+    payload = render.export_response(decisions, state.load_history(), now_iso())
+    # Export is a data bundle: always JSON, even without --json.
+    print(json.dumps(payload, separators=(',', ':'), default=str))
+    return ExitCode.OK
+
+
+def _filter_by_pair(
+    records: list[dict[str, object]], requested: list[str] | None
+) -> list[dict[str, object]]:
+    '''Keep records whose symbol is in ``requested`` (no portfolio validation).'''
+    if not requested:
+        return records
+    wanted = {symbol.upper() for symbol in requested}
+    return [record for record in records if record.get('symbol') in wanted]
 
 
 def _portfolio_store(args: argparse.Namespace) -> tuple[PortfolioStore, config_mod.AppConfig]:

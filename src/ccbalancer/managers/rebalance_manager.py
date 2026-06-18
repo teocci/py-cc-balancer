@@ -37,10 +37,23 @@ from ccbalancer.utils.timeutil import hours_between, now_iso
 if TYPE_CHECKING:
     from ccbalancer.config import AppConfig
 
-__all__ = ['RebalanceManager']
+__all__ = ['RebalanceManager', 'GUARD_ORDER']
 
 _PCT = 100.0
 _HOURS_PER_DAY = 24.0
+
+# Fixed evaluation order of the skip guards (first failure wins). This is the
+# source of truth for the order in :meth:`RebalanceManager.decide`; the decision
+# log reconstructs each guard's pass/fail ladder from it. ``OK`` is the outcome
+# when every guard passes and so is not itself a guard.
+GUARD_ORDER = (
+    SkipReason.ABNORMAL_PRICE,
+    SkipReason.MARKET_UNAVAILABLE,
+    SkipReason.TOO_SOON,
+    SkipReason.WITHIN_BAND,
+    SkipReason.BELOW_MIN_NOTIONAL,
+    SkipReason.INSUFFICIENT_BALANCE,
+)
 
 
 @dataclass(slots=True, frozen=True)

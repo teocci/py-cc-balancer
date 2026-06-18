@@ -97,6 +97,24 @@ def test_record_saves_state_and_appends_event(store):
     assert len(store.history_path.read_text(encoding='utf-8').splitlines()) == 1
 
 
+def test_load_history_empty_when_absent(store):
+    assert store.load_history() == []
+
+
+def test_load_history_returns_events_in_append_order(store):
+    store.append_event(_event('BTC/USDT'))
+    store.append_event(_event('ETH/USDT'))
+    events = store.load_history()
+    assert [event['symbol'] for event in events] == ['BTC/USDT', 'ETH/USDT']
+    assert events[0]['side'] == 'sell'
+
+
+def test_load_history_corrupt_line_raises(store):
+    store.history_path.write_text('{ not json\n', encoding='utf-8')
+    with pytest.raises(StateError):
+        store.load_history()
+
+
 def test_corrupt_state_file_raises(store):
     store.state_path.write_text('{ not json', encoding='utf-8')
     with pytest.raises(StateError):

@@ -1,7 +1,7 @@
 # PROGRESS
 
 **Current version:** 0.1.0 (unreleased)
-**Active phase:** Phase 9 — Decision memory + audit category
+**Active phase:** Phase 10 — Execution + safety guardrails + Binance
 
 ## Phase status
 
@@ -16,7 +16,7 @@
 | 6 | Rebalance decision logic | done |
 | 7 | Read-only CLI (`status`, `plan`) | done |
 | 8 | Market intelligence (OHLCV, indicators, `analyze`) | done |
-| 9 | Decision memory + audit category | pending |
+| 9 | Decision memory + audit category | done |
 | 10 | Execution + safety guardrails + Binance | pending |
 | 11 | Performance & cost-basis (`performance`) | pending |
 | 12 | Regime signal + agent flags/milestones | pending |
@@ -30,10 +30,19 @@
 
 ## Next action
 
-Implement Phase 9: decision memory + audit category. Add `stores/decision_store.py` (append-only
-`~/.ccbalancer/decision_log.jsonl`; one record per `decide()` call with inputs + drift + each guard
-pass/fail + proposed/executed order), hook `plan`/`decide()` to append a decision record, and wire
-the **audit** command group in `cli.py` (`decisions`, `history`, `export` — local logs only, no
-network, no side effects) with `--help` grouped by read/write/audit. See `docs/phases/phase-9.md`.
-DoD: every `decide()` appends exactly one record; `decisions`/`history` read it back; records are
-append-only and jq-queryable; JSON carries `schema_version`; audit commands make zero network calls.
+Implement Phase 10: execution + safety guardrails + Binance. Add `managers/execution_manager.py`
+(cancel stale `CCB_PREFIX` orders, price limits from bid/ask + offset, place tagged orders, persist
+`state.json` + append `history.jsonl`) and `stores/ledger_store.py` (`ledger.jsonl` fills). Add the
+DoD-blocking safety guardrails (`rebalance` dry-run by default, per-run `max_session_notional_usd`
+cap, confirm-token issued by `plan` and required by `rebalance`, kill-switch file, trade-only key
+scoping), enable Binance alongside Bybit with a per-exchange quirks matrix, and wire
+`rebalance`/`orders`/`cancel` in `cli.py`. See `docs/phases/phase-10.md`. DoD: `rebalance --dry-run`
+writes nothing and is the default; execution refuses without explicit flag/confirm-token; session cap
++ kill-switch block; testnet `rebalance` places/cancels exactly the planned orders and updates state +
+history + ledger; re-run idempotent; both exchanges pass the quirks matrix; exit codes correct.
+
+> Phase 9 (done): `stores/decision_store.py` append-only `decision_log.jsonl` (one jq-queryable record
+> per decision: inputs + drift + guard ladder + order, `schema_version`); `plan` appends per pair while
+> `status` does not write; `StateStore.load_history()`; audit commands `decisions`/`history`/`export`
+> (local logs only, zero network); `--help` grouped read/write/audit. `GUARD_ORDER` in
+> `rebalance_manager` is the single source of truth the log ladder mirrors.

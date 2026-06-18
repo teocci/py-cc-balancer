@@ -57,3 +57,14 @@ All notable changes to this project are documented here. Format follows
     `target_set_price`/`target_set_ts`) with `pair add/set` flags.
   - RSI verified against the StockCharts reference (70.53); cache hit/miss/stale/offline and the
     discover→set→analyze loop covered, no network in tests.
+- Phase 9: decision memory + audit category — `stores/decision_store.py`, an append-only
+  `~/.ccbalancer/decision_log.jsonl` (one compact, jq-queryable JSON line per decision carrying
+  inputs, signed drift, the full guard pass/fail ladder, and the proposed order, each with
+  `schema_version`); `guard_ladder()` reconstructs every guard's status from the decision reason
+  via `GUARD_ORDER` (single source of truth in `rebalance_manager`, so the log mirrors the runtime
+  guard chain). `plan` appends one record per pair; `status`'s display-only `decide()` does not write.
+  - `StateStore.load_history()` reads `history.jsonl` back as raw dicts (tolerant of older schemas).
+  - **Audit command group** (local logs only — zero network, no exchange access): `decisions` and
+    `history` replay their logs (stable envelope, `--pair` filter, text or `--json`); `export` bundles
+    both as one JSON document (always JSON). Top-level `--help` now groups commands by read/write/audit.
+  - Audit network-freeness enforced in tests via an `_exchange_store` seam that raises if touched.

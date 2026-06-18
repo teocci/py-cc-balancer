@@ -17,6 +17,7 @@ __all__ = [
     'PORTFOLIO_FILENAME',
     'STATE_FILENAME',
     'HISTORY_FILENAME',
+    'DECISION_LOG_FILENAME',
     'INDICATORS_FILENAME',
     'OHLCV_DIRNAME',
     'PROJECT_CONFIG_FILENAME',
@@ -72,6 +73,9 @@ ENV_FILENAME = '.env'
 PORTFOLIO_FILENAME = 'portfolio.json'
 STATE_FILENAME = 'state.json'
 HISTORY_FILENAME = 'history.jsonl'
+# Append-only log of every rebalance decision (inputs + guard ladder + order),
+# written on `plan`/`rebalance`; the offline decision memory read by `decisions`.
+DECISION_LOG_FILENAME = 'decision_log.jsonl'
 # Indicator parameter overrides, kept out of config.toml (own concern, safely
 # machine-rewritable by `indicator set`).
 INDICATORS_FILENAME = 'indicators.toml'

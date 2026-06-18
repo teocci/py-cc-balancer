@@ -35,10 +35,15 @@ __all__ = [
     'status_response',
     'analyze_response',
     'indicator_catalog_response',
+    'decisions_response',
+    'history_response',
+    'export_response',
     'plan_lines',
     'status_lines',
     'analyze_lines',
     'indicator_catalog_lines',
+    'decisions_lines',
+    'history_lines',
 ]
 
 # Pairs of (snapshot, decision) carried through the status path.
@@ -160,12 +165,39 @@ def indicator_catalog_response(catalog: list[dict[str, object]], generated_at: s
     Local command (no exchange context), so the envelope is the registry
     description plus ``schema_version`` for the agent's discovery.
     '''
-    return {
-        'schema_version': SCHEMA_VERSION,
-        'command': 'indicator list',
-        'generated_at': generated_at,
-        'indicators': catalog,
-    }
+    return _local_envelope('indicator list', generated_at, {'indicators': catalog})
+
+
+def decisions_response(records: list[dict[str, object]], generated_at: str) -> dict[str, object]:
+    '''Build the `decisions` JSON envelope from logged decision records.'''
+    body = {'count': len(records), 'decisions': records}
+    return _local_envelope('decisions', generated_at, body)
+
+
+def history_response(events: list[dict[str, object]], generated_at: str) -> dict[str, object]:
+    '''Build the `history` JSON envelope from logged rebalance events.'''
+    body = {'count': len(events), 'history': events}
+    return _local_envelope('history', generated_at, body)
+
+
+def export_response(
+    decisions: list[dict[str, object]],
+    history: list[dict[str, object]],
+    generated_at: str,
+) -> dict[str, object]:
+    '''Build the `export` JSON document bundling the local audit logs.'''
+    body = {'decisions': decisions, 'history': history}
+    return _local_envelope('export', generated_at, body)
+
+
+def decisions_lines(records: list[dict[str, object]]) -> list[str]:
+    '''Render logged decisions as one text line per record.'''
+    return [_decision_record_line(record) for record in records]
+
+
+def history_lines(events: list[dict[str, object]]) -> list[str]:
+    '''Render logged rebalance events as one text line per record.'''
+    return [_history_event_line(event) for event in events]
 
 
 def indicator_catalog_lines(catalog: list[dict[str, object]]) -> list[str]:
@@ -208,6 +240,50 @@ def _envelope(command: str, meta: dict[str, object], body: dict[str, object]) ->
         'generated_at': meta['generated_at'],
         **body,
     }
+
+
+def _local_envelope(command: str, generated_at: str, body: dict[str, object]) -> dict[str, object]:
+    '''Envelope for local commands that carry no live exchange context.'''
+    return {
+        'schema_version': SCHEMA_VERSION,
+        'command': command,
+        'generated_at': generated_at,
+        **body,
+    }
+
+
+def _decision_record_line(record: dict[str, object]) -> str:
+    drift = _signed_pp(record.get('drift_pct'))
+    order = record.get('proposed_order')
+    action = _order_summary(order) if record.get('rebalance') and order else 'hold'
+    return (
+        f'{record.get("ts")}  {record.get("symbol")}  {action}  '
+        f'drift {drift}  [{record.get("reason")}]'
+    )
+
+
+def _history_event_line(event: dict[str, object]) -> str:
+    quote = _quote(str(event.get('symbol', '')))
+    notional = event.get('notional')
+    notional_str = f'{notional:.2f}' if isinstance(notional, (int, float)) else str(notional)
+    return (
+        f'{event.get("ts")}  {event.get("symbol")}  {event.get("side")} '
+        f'{event.get("amount")} @ {event.get("price")} ({notional_str} {quote})  '
+        f'[{event.get("reason")}] {event.get("status")}'
+    )
+
+
+def _order_summary(order: dict[str, object]) -> str:
+    return (
+        f'{order.get("side")} {order.get("amount")} @ {order.get("limit_price")} '
+        f'({order.get("notional")} notional)'
+    )
+
+
+def _signed_pp(value: object) -> str:
+    if not isinstance(value, (int, float)):
+        return 'n/a'
+    return f'{value:+.2f}pp'
 
 
 def _plan_line(decision: RebalanceDecision) -> str:
