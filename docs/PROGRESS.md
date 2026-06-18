@@ -1,7 +1,7 @@
 # PROGRESS
 
 **Current version:** 0.1.0 (unreleased)
-**Active phase:** Phase 7 — Read-only CLI (`status`, `plan`)
+**Active phase:** Phase 8 — Market intelligence (OHLCV, indicators, `analyze`)
 
 ## Phase status
 
@@ -14,7 +14,7 @@
 | 4 | Exchange store (ccxt wrapper) | done |
 | 5 | State store + portfolio snapshots | done |
 | 6 | Rebalance decision logic | done |
-| 7 | Read-only CLI (`status`, `plan`) | pending |
+| 7 | Read-only CLI (`status`, `plan`) | done |
 | 8 | Market intelligence (OHLCV, indicators, `analyze`) | pending |
 | 9 | Decision memory + audit category | pending |
 | 10 | Execution + safety guardrails + Binance | pending |
@@ -30,8 +30,11 @@
 
 ## Next action
 
-Implement Phase 7: the agent's read path. Add `utils/render.py` (text + JSON; stable key order,
-enum-string reasons) and wire `status` + `plan` in `cli.py` over the existing managers
-(`PortfolioManager.snapshots` → `RebalanceManager.decide`). See `docs/phases/phase-7.md`. DoD:
-`plan --json` emits the stable contract incl `days_since_last`; a no-drift re-run is all
-`WITHIN_BAND` with exit 0; `status` shows current vs target + `last_rebalance_at`.
+Implement Phase 8: market intelligence (the agent's "eyes"). Add `utils/indicators.py` (pure
+`ema`/`rsi`/`macd`/`bollinger`/`atr`/`fib_levels`), `stores/exchange.py` `fetch_ohlcv`,
+`stores/market_cache.py` (cached OHLCV under `~/.ccbalancer/ohlcv/`, TTL/offline fallback),
+`managers/indicators_manager.py` (multi-timeframe `IndicatorSnapshot`s), the `IndicatorSnapshot`
+model, `data_exchange`/`decision_timeframes`/`analysis_timeframes` config, and wire `analyze <pair>
+[--timeframe ...]` in `cli.py`. See `docs/phases/phase-8.md`. DoD: each indicator verified against
+fixed OHLCV fixtures; cache hit/miss/stale/offline paths tested; `analyze BTC/USDT --timeframe 1h
+--json` returns a stable, versioned multi-timeframe snapshot; no network in tests.

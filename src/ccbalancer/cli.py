@@ -15,7 +15,12 @@ import sys
 from ccbalancer import __version__
 from ccbalancer import config as config_mod
 from ccbalancer.config import Defaults
-from ccbalancer.constants import PORTFOLIO_FILENAME, ExitCode
+from ccbalancer.constants import (
+    HISTORY_FILENAME,
+    PORTFOLIO_FILENAME,
+    STATE_FILENAME,
+    ExitCode,
+)
 from ccbalancer.exceptions import (
     AppError,
     ConfigError,
@@ -24,9 +29,15 @@ from ccbalancer.exceptions import (
     PortfolioError,
     StateError,
 )
+from ccbalancer.managers.portfolio_manager import PortfolioManager
+from ccbalancer.managers.rebalance_manager import RebalanceManager
 from ccbalancer.models import PairConfig
+from ccbalancer.stores.exchange import ExchangeStore
 from ccbalancer.stores.portfolio_store import PortfolioStore, pair_to_dict
+from ccbalancer.stores.state_store import StateStore
+from ccbalancer.utils import render
 from ccbalancer.utils.logging import configure_logging
+from ccbalancer.utils.timeutil import now_iso
 
 __all__ = ['build_parser', 'main']
 
@@ -49,6 +60,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest='command', metavar='<command>')
     subparsers.add_parser('version', parents=[common], help='Print the ccbalancer version.')
+    subparsers.add_parser('status', parents=[common], help='Show current vs target allocation per pair.')
+    subparsers.add_parser('plan', parents=[common], help='Show rebalance decisions without executing.')
     _add_config_command(subparsers, common)
     _add_pair_command(subparsers, common)
     return parser
@@ -109,6 +122,10 @@ def _add_pair_command(subparsers: argparse._SubParsersAction, common: argparse.A
 def _dispatch(args: argparse.Namespace) -> ExitCode:
     if args.command == 'version':
         return _cmd_version(args)
+    if args.command == 'status':
+        return _cmd_status(args)
+    if args.command == 'plan':
+        return _cmd_plan(args)
     if args.command == 'config':
         return _cmd_config(args)
     if args.command == 'pair':
@@ -119,6 +136,61 @@ def _dispatch(args: argparse.Namespace) -> ExitCode:
 def _cmd_version(args: argparse.Namespace) -> ExitCode:
     _emit(args, {'version': __version__}, [__version__])
     return ExitCode.OK
+
+
+def _cmd_status(args: argparse.Namespace) -> ExitCode:
+    pairs, portfolio_mgr, rebalance_mgr, meta = _read_context(args)
+    snapshots = portfolio_mgr.snapshots(pairs)
+    rows = [
+        (snapshot, rebalance_mgr.decide(pair, snapshot, now=meta['generated_at']))
+        for pair, snapshot in zip(pairs, snapshots)
+    ]
+    payload = render.status_response(rows, meta)
+    _emit(args, payload, render.status_lines(rows) or ['(no pairs configured)'])
+    return ExitCode.OK
+
+
+def _cmd_plan(args: argparse.Namespace) -> ExitCode:
+    pairs, portfolio_mgr, rebalance_mgr, meta = _read_context(args)
+    snapshots = portfolio_mgr.snapshots(pairs)
+    decisions = [
+        rebalance_mgr.decide(pair, snapshot, now=meta['generated_at'])
+        for pair, snapshot in zip(pairs, snapshots)
+    ]
+    payload = render.plan_response(decisions, meta)
+    _emit(args, payload, render.plan_lines(decisions) or ['(no pairs configured)'])
+    return ExitCode.OK
+
+
+def _read_context(
+    args: argparse.Namespace,
+) -> tuple[list[PairConfig], PortfolioManager, RebalanceManager, dict[str, object]]:
+    '''Resolve config and stores into the managers a read command needs.'''
+    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    portfolio = PortfolioStore(config.app_dir / PORTFOLIO_FILENAME)
+    pairs = _selected_pairs(portfolio, args.pair)
+    state = StateStore(config.app_dir / STATE_FILENAME, config.app_dir / HISTORY_FILENAME)
+    portfolio_mgr = PortfolioManager(_exchange_store(config), state)
+    rebalance_mgr = RebalanceManager.from_config(config)
+    meta = {'exchange': config.exchange, 'testnet': config.testnet, 'generated_at': now_iso()}
+    return pairs, portfolio_mgr, rebalance_mgr, meta
+
+
+def _exchange_store(config: config_mod.AppConfig) -> ExchangeStore:
+    '''Build the exchange store (seam for tests to inject a fake).'''
+    return ExchangeStore.from_config(config)
+
+
+def _selected_pairs(store: PortfolioStore, requested: list[str] | None) -> list[PairConfig]:
+    pairs = store.load()
+    if not requested:
+        return pairs
+    wanted = {symbol.upper() for symbol in requested}
+    known = {pair.symbol for pair in pairs}
+    missing = sorted(wanted - known)
+    if missing:
+        raise PortfolioError(f'Pair(s) not configured: {", ".join(missing)}')
+    return [pair for pair in pairs if pair.symbol in wanted]
 
 
 def _cmd_config(args: argparse.Namespace) -> ExitCode:

@@ -30,3 +30,9 @@ All notable changes to this project are documented here. Format follows
   `BELOW_MIN_NOTIONAL` → `INSUFFICIENT_BALANCE` → max-trade clamp → `OK`), signed
   `drift_pct` sizing for BUY/SELL, passive limit-price offset, and precision-aware
   amount rounding; `from_config` wires the three relevant settings from `AppConfig`.
+- Phase 7: read-only CLI — `utils/render.py` (single stable-JSON/text serialization
+  path: fixed key order, enum-string reasons, `schema_version` envelope) and the
+  `status`/`plan` commands wired over `PortfolioManager.snapshots` → `RebalanceManager.decide`,
+  with `--pair` filtering and an `_exchange_store` seam for network-free tests;
+  `SCHEMA_VERSION` constant. `plan --json` emits the stable contract incl `days_since_last`;
+  balanced holdings → all `within_band`, exit 0.

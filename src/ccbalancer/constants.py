@@ -37,6 +37,7 @@ __all__ = [
     'DEFAULT_MAX_TRADE_NOTIONAL',
     'RATIO_TOTAL_PCT',
     'SUPPORTED_EXCHANGES',
+    'SCHEMA_VERSION',
     'ExitCode',
 ]
 
@@ -82,6 +83,9 @@ RATIO_TOTAL_PCT = 100.0
 
 # Exchanges supported via ccxt for this tool.
 SUPPORTED_EXCHANGES = ('bybit', 'binance')
+
+# Version of the stable JSON contract emitted by read commands.
+SCHEMA_VERSION = 1
 
 
 class ExitCode(IntEnum):
