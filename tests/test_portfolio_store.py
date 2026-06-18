@@ -66,6 +66,55 @@ def test_bad_ratio_rejected_on_construct():
         PairConfig('BTC/USDT', 80.0, 30.0, 5.0, 10.0)
 
 
+def test_baseline_fields_round_trip(store):
+    pair = PairConfig(
+        'BTC/USDT', 80.0, 20.0, 5.0, 10.0,
+        entry_price=48000.0, entry_ts='2026-06-01T00:00:00Z',
+        invested_capital=10000.0, target_set_price=50000.0,
+        target_set_ts='2026-06-02T00:00:00Z',
+    )
+    store.add(pair)
+    loaded = store.get('BTC/USDT')
+    assert loaded.entry_price == 48000.0
+    assert loaded.entry_ts == '2026-06-01T00:00:00Z'
+    assert loaded.invested_capital == 10000.0
+    assert loaded.target_set_price == 50000.0
+    assert loaded.target_set_ts == '2026-06-02T00:00:00Z'
+
+
+def test_baselines_default_to_none(store):
+    store.add(_pair())
+    loaded = store.get('BTC/USDT')
+    assert loaded.entry_price is None
+    assert loaded.target_set_ts is None
+
+
+def test_negative_entry_price_rejected():
+    with pytest.raises(PortfolioError):
+        PairConfig('BTC/USDT', 80.0, 20.0, 5.0, 10.0, entry_price=-1.0)
+
+
+def test_cli_pair_add_captures_entry_and_stamps_ts(appdir, capsys):
+    rc = cli.main([
+        'pair', 'add', 'BTC/USDT', '--entry-price', '48000',
+        '--invested', '10000', '--target-set-price', '50000', '--json',
+    ])
+    assert rc == 0
+    pair = json.loads(capsys.readouterr().out)['pair']
+    assert pair['entry_price'] == 48000.0
+    assert pair['invested_capital'] == 10000.0
+    assert pair['target_set_price'] == 50000.0
+    assert pair['entry_ts'].endswith('Z')
+    assert pair['target_set_ts'].endswith('Z')
+
+
+def test_cli_pair_add_without_baselines_leaves_them_null(appdir, capsys):
+    cli.main(['pair', 'add', 'BTC/USDT', '--json'])
+    pair = json.loads(capsys.readouterr().out)['pair']
+    assert pair['entry_price'] is None
+    assert pair['entry_ts'] is None
+
+
 def test_cli_pair_add_then_list_json(appdir, capsys):
     assert cli.main(['pair', 'add', 'sui/usdt', '--target', '25/75', '--min-notional', '5']) == 0
     capsys.readouterr()

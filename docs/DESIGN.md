@@ -38,8 +38,17 @@ evaluates them deterministically and reports hits (Layer-2 defines, Layer-1 comp
   `fetch_ohlcv` returns `[time,o,h,l,c,v]` in one uniform shape across Bybit/Binance/OKX; public OHLCV
   is free, no API key. The indicator math never knows which exchange supplied candles → **exchange-
   agnostic**; a `data_exchange` config key picks the source (may differ from the trading exchange).
-- **v1 indicators** (extensible library, not a hardcoded set): RSI, MACD(12/26/9), EMA 12/26/200,
-  Bollinger Bands, ATR, Fibonacci retracement levels.
+- **v1 indicators** (a code **registry**, not a hardcoded set): RSI, MACD(12/26/9), EMA 12/26/200,
+  Bollinger Bands, ATR, Volume MA, Fibonacci retracement levels. Adding an indicator = a pure
+  function + a registry entry. The registry is **introspectable** — `indicator list` serializes each
+  indicator's parameters (name, type, default, current value, description) so an agent can discover
+  the configuration surface, and `indicator set` writes registry-validated overrides.
+- **Indicator settings vs registry vs storage** (three separate things): the *registry* (which
+  indicators exist + their math) is code; *parameters/thresholds* (RSI period + overbought/oversold,
+  EMA periods, Volume MA window, …) live in their own `indicators.toml` (kept out of `config.toml`),
+  resolved over the registry defaults. RSI thresholds yield a deterministic `rsi_zone` fact in the
+  snapshot — the CLI computes the comparison; the agent still judges. Scaling path to many indicators:
+  `[[indicators]]` instance arrays + an agent-managed file, adopted when count actually grows.
 - **Multi-timeframe:** `decision_timeframes = ['1m','5m','15m']` (cadence) and
   `analysis_timeframes = ['1h','4h','1d','1w']` (strategy). Indicators compute per requested timeframe;
   Fibonacci picks its swing high/low from a per-timeframe lookback.
@@ -85,6 +94,7 @@ New models (frozen+slots): `IndicatorSnapshot`, `PerformanceSnapshot`, `RegimeSi
 | File | Kind | Edited by |
 |---|---|---|
 | `config.toml` | settings (exchange, testnet, sanity %, limit offset, timeouts, defaults) | human |
+| `indicators.toml` | indicator parameter overrides (registry-validated; own concern, not in `config.toml`) | human + `indicator set` |
 | `.env` | secrets (`CCB_API_KEY`, `CCB_API_SECRET`) | human (never committed, 600) |
 | `portfolio.json` | pairs + per-pair target/band/notionals + entry & target-set baselines | CLI `pair` commands |
 | `state.json` | last rebalance event per pair | tool (on `rebalance`) |
@@ -109,9 +119,9 @@ Idempotent: re-run cancels its own leftovers and re-places.
 ## Command taxonomy (three categories)
 
 - **read** (live data, no side effects): `status` · `plan` · `analyze <pair> [--timeframe ...]` ·
-  `performance [--pair]` · `regime [--pair]` · `orders` · `version`
+  `indicator list` · `performance [--pair]` · `regime [--pair]` · `orders` · `version`
 - **write** (mutate state / place orders; dry-run by default, guarded): `rebalance` · `cancel` ·
-  `pair (list/add/set/remove)` · `flag (add/list/remove)` · `config (show/init)`
+  `pair (list/add/set/remove)` · `indicator set` · `flag (add/list/remove)` · `config (show/init)`
 - **audit** (local logs only, no network, no side effects): `decisions` · `history` ·
   `performance --history` · `export`
 

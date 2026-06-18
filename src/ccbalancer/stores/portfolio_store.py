@@ -17,6 +17,16 @@ from ccbalancer.models import PairConfig
 __all__ = ['PortfolioStore', 'pair_to_dict']
 
 
+def _opt_float(value: object) -> float | None:
+    '''Coerce an optional numeric field to ``float``, preserving ``None``.'''
+    return None if value is None else float(value)
+
+
+def _opt_str(value: object) -> str | None:
+    '''Coerce an optional text field to ``str``, preserving ``None``.'''
+    return None if value is None else str(value)
+
+
 def pair_to_dict(pair: PairConfig) -> dict[str, object]:
     '''Serialize a :class:`PairConfig` to a plain dict.'''
     return {
@@ -26,6 +36,11 @@ def pair_to_dict(pair: PairConfig) -> dict[str, object]:
         'band_pct': pair.band_pct,
         'min_notional': pair.min_notional,
         'max_trade_notional': pair.max_trade_notional,
+        'entry_price': pair.entry_price,
+        'entry_ts': pair.entry_ts,
+        'invested_capital': pair.invested_capital,
+        'target_set_price': pair.target_set_price,
+        'target_set_ts': pair.target_set_ts,
     }
 
 
@@ -114,6 +129,11 @@ class PortfolioStore:
                 band_pct=float(entry['band_pct']),
                 min_notional=float(entry['min_notional']),
                 max_trade_notional=float(entry.get('max_trade_notional', 0.0)),
+                entry_price=_opt_float(entry.get('entry_price')),
+                entry_ts=_opt_str(entry.get('entry_ts')),
+                invested_capital=_opt_float(entry.get('invested_capital')),
+                target_set_price=_opt_float(entry.get('target_set_price')),
+                target_set_ts=_opt_str(entry.get('target_set_ts')),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise PortfolioError(f'Invalid pair entry {entry!r}: {exc}') from exc

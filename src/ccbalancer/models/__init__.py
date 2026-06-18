@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ccbalancer.models.balance import AssetBalance, PairSnapshot
 from ccbalancer.models.decision import ProposedOrder, RebalanceDecision
+from ccbalancer.models.indicators import IndicatorSnapshot
 from ccbalancer.models.pair_config import PairConfig
 from ccbalancer.models.result import ExecutionResult
 from ccbalancer.models.state import HistoryEvent, RebalanceState
@@ -14,6 +15,7 @@ __all__ = [
     'PairSnapshot',
     'ProposedOrder',
     'RebalanceDecision',
+    'IndicatorSnapshot',
     'RebalanceState',
     'HistoryEvent',
     'ExecutionResult',

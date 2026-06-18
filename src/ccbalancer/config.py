@@ -14,16 +14,18 @@ from __future__ import annotations
 
 import os
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 from ccbalancer import constants as c
 from ccbalancer.exceptions import ConfigError
+from ccbalancer.utils import indicator_registry as registry
 
 __all__ = [
     'Defaults',
+    'IndicatorSettings',
     'AppConfig',
     'load_config',
     'resolve_app_dir',
@@ -31,6 +33,8 @@ __all__ = [
     'masked_summary',
     'require_credentials',
     'init_app_dir',
+    'read_indicator_overrides',
+    'write_indicator_overrides',
 ]
 
 
@@ -46,6 +50,32 @@ class Defaults:
 
 
 @dataclass(slots=True, frozen=True)
+class IndicatorSettings:
+    '''Resolved indicator parameters, keyed by indicator then parameter.
+
+    Built by resolving ``indicators.toml`` overrides over the registry defaults
+    (see :mod:`ccbalancer.utils.indicator_registry`). Kept dict-shaped rather
+    than a fixed set of fields so new indicators need no change here — only a
+    registry entry. These are *settings* (how indicators are computed and read),
+    separate from the *registry* (which indicators exist) and from where they are
+    stored (``indicators.toml``, its own file).
+
+    Attributes:
+        values: ``indicator -> {param -> value}`` for every registered indicator.
+    '''
+
+    values: dict[str, dict[str, object]] = field(default_factory=registry.default_values)
+
+    def get(self, indicator: str, param: str) -> object:
+        '''Return one resolved parameter value.'''
+        return self.values[indicator][param]
+
+    def section(self, indicator: str) -> dict[str, object]:
+        '''Return all resolved parameters for one indicator.'''
+        return self.values[indicator]
+
+
+@dataclass(slots=True, frozen=True)
 class AppConfig:
     '''Fully resolved application settings.
 
@@ -56,11 +86,19 @@ class AppConfig:
         limit_offset_pct: Limit-price offset from the touch.
         min_interval_hours: Optional cadence guard; 0 disables it.
         http_timeout_ms: Exchange HTTP timeout in milliseconds.
+        data_exchange: ccxt exchange id supplying OHLCV (may differ from ``exchange``).
+        decision_timeframes: Short cadence timeframes for decisions.
+        analysis_timeframes: Longer timeframes for strategy analysis.
+        ohlcv_limit: Number of candles fetched per timeframe.
         defaults: Per-pair default values.
+        indicators: Resolved indicator parameters and thresholds.
         api_key: API key from the environment, or ``None``.
         api_secret: API secret from the environment, or ``None``.
         app_dir: The resolved ``~/.ccbalancer`` directory.
         config_path: The config file used, or ``None`` if none was found.
+        indicators_path: Location of ``indicators.toml`` (read/written by the
+            indicator commands), or ``None`` in synthetic configs.
+        indicators: Resolved indicator parameters and thresholds.
     '''
 
     exchange: str
@@ -69,11 +107,17 @@ class AppConfig:
     limit_offset_pct: float
     min_interval_hours: int
     http_timeout_ms: int
+    data_exchange: str
+    decision_timeframes: tuple[str, ...]
+    analysis_timeframes: tuple[str, ...]
+    ohlcv_limit: int
     defaults: Defaults
     api_key: str | None
     api_secret: str | None
     app_dir: Path
     config_path: Path | None
+    indicators_path: Path | None = None
+    indicators: IndicatorSettings = field(default_factory=IndicatorSettings)
 
 
 def resolve_app_dir() -> Path:
@@ -127,6 +171,8 @@ def load_config(
     exchange = (exchange_override or os.getenv(c.ENV_EXCHANGE) or glob.get('exchange', c.DEFAULT_EXCHANGE)).lower()
     _validate_exchange(exchange)
     testnet = _resolve_testnet(testnet_override, glob)
+    data_exchange = _resolve_data_exchange(glob, exchange)
+    indicators_path = app_dir / c.INDICATORS_FILENAME
 
     return AppConfig(
         exchange=exchange,
@@ -135,11 +181,17 @@ def load_config(
         limit_offset_pct=float(glob.get('limit_offset_pct', c.DEFAULT_LIMIT_OFFSET_PCT)),
         min_interval_hours=int(glob.get('min_interval_hours', c.DEFAULT_MIN_INTERVAL_HOURS)),
         http_timeout_ms=int(glob.get('http_timeout_ms', c.DEFAULT_HTTP_TIMEOUT_MS)),
+        data_exchange=data_exchange,
+        decision_timeframes=_resolve_timeframes(glob, 'decision_timeframes', c.DEFAULT_DECISION_TIMEFRAMES),
+        analysis_timeframes=_resolve_timeframes(glob, 'analysis_timeframes', c.DEFAULT_ANALYSIS_TIMEFRAMES),
+        ohlcv_limit=int(glob.get('ohlcv_limit', c.DEFAULT_OHLCV_LIMIT)),
         defaults=defaults,
         api_key=os.getenv(c.ENV_API_KEY),
         api_secret=os.getenv(c.ENV_API_SECRET),
         app_dir=app_dir,
         config_path=config_path,
+        indicators_path=indicators_path,
+        indicators=IndicatorSettings(registry.resolve(read_indicator_overrides(indicators_path))),
     )
 
 
@@ -166,6 +218,10 @@ def masked_summary(config: AppConfig) -> dict[str, object]:
         'limit_offset_pct': config.limit_offset_pct,
         'min_interval_hours': config.min_interval_hours,
         'http_timeout_ms': config.http_timeout_ms,
+        'data_exchange': config.data_exchange,
+        'decision_timeframes': list(config.decision_timeframes),
+        'analysis_timeframes': list(config.analysis_timeframes),
+        'ohlcv_limit': config.ohlcv_limit,
         'defaults': {
             'target_volatile_pct': config.defaults.target_volatile_pct,
             'target_stable_pct': config.defaults.target_stable_pct,
@@ -192,6 +248,7 @@ def init_app_dir(app_dir: Path) -> list[Path]:
     app_dir.mkdir(parents=True, exist_ok=True)
     created: list[Path] = []
     created += _write_if_absent(app_dir / c.CONFIG_FILENAME, CONFIG_TEMPLATE)
+    created += _write_if_absent(app_dir / c.INDICATORS_FILENAME, INDICATORS_TEMPLATE)
     env_path = app_dir / c.ENV_FILENAME
     created += _write_if_absent(env_path, ENV_TEMPLATE)
     _restrict_permissions(env_path)
@@ -228,6 +285,58 @@ def _build_defaults(section: dict[str, object]) -> Defaults:
     )
 
 
+def read_indicator_overrides(path: Path | None) -> dict[str, object]:
+    '''Return raw indicator overrides parsed from ``indicators.toml``.
+
+    Returns an empty mapping if the file is absent. The result is the on-disk
+    overrides only (not merged with defaults); pass it to
+    :func:`indicator_registry.resolve` to validate and merge.
+
+    Raises:
+        ConfigError: If the file exists but cannot be parsed.
+    '''
+    if path is None or not path.is_file():
+        return {}
+    try:
+        with open(path, 'rb') as handle:
+            return tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise ConfigError(f'Cannot read indicators {path}: {exc}') from exc
+
+
+def write_indicator_overrides(path: Path, overrides: dict[str, dict[str, object]]) -> None:
+    '''Write indicator overrides to ``indicators.toml`` (atomic, machine-owned).
+
+    Only the overridden parameters are persisted; omitted ones fall back to the
+    registry defaults on the next read.
+    '''
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = _render_indicators_toml(overrides)
+    tmp = path.with_name(path.name + '.tmp')
+    tmp.write_text(body, encoding='utf-8')
+    tmp.replace(path)
+
+
+def _render_indicators_toml(overrides: dict[str, dict[str, object]]) -> str:
+    lines = ['# Managed by ccbalancer. Indicator parameter overrides.',
+             '# Discover available indicators and parameters with `ccbalancer indicators`.', '']
+    for indicator, params in overrides.items():
+        if not params:
+            continue
+        lines.append(f'[{indicator}]')
+        lines.extend(f'{name} = {_toml_value(value)}' for name, value in params.items())
+        lines.append('')
+    return '\n'.join(lines)
+
+
+def _toml_value(value: object) -> str:
+    if isinstance(value, (list, tuple)):
+        return '[' + ', '.join(_toml_value(item) for item in value) + ']'
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    return repr(value) if isinstance(value, float) else str(value)
+
+
 def _resolve_testnet(override: bool | None, glob: dict[str, object]) -> bool:
     if override is not None:
         return override
@@ -241,6 +350,22 @@ def _validate_exchange(exchange: str) -> None:
     if exchange not in c.SUPPORTED_EXCHANGES:
         supported = ', '.join(c.SUPPORTED_EXCHANGES)
         raise ConfigError(f'Unsupported exchange {exchange!r}; choose one of: {supported}')
+
+
+def _resolve_data_exchange(glob: dict[str, object], trading_exchange: str) -> str:
+    configured = str(glob.get('data_exchange', c.DEFAULT_DATA_EXCHANGE)).lower()
+    data_exchange = configured or trading_exchange
+    _validate_exchange(data_exchange)
+    return data_exchange
+
+
+def _resolve_timeframes(glob: dict[str, object], key: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    raw = glob.get(key)
+    if raw is None:
+        return default
+    if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
+        raise ConfigError(f'Config [global] {key} must be a list of timeframe strings')
+    return tuple(raw)
 
 
 def _parse_bool(value: str) -> bool:
@@ -277,6 +402,10 @@ quote_sanity_pct = 15.0     # reject ticker deviating > this vs recent
 limit_offset_pct = 0.0      # limit price offset from touch (0 = at best bid/ask)
 min_interval_hours = 0      # optional TOO_SOON guard; 0 = disabled (agent owns cadence)
 http_timeout_ms = 10000
+data_exchange = ''          # OHLCV source; '' = use the trading exchange
+decision_timeframes = ['1m', '5m', '15m']   # short cadence timeframes
+analysis_timeframes = ['1h', '4h', '1d', '1w']   # longer strategy timeframes
+ohlcv_limit = 500           # candles fetched per timeframe
 
 [defaults]                  # applied when `pair add` omits a field
 target_volatile_pct = 80.0
@@ -284,6 +413,39 @@ target_stable_pct   = 20.0
 band_pct            = 5.0
 min_notional        = 10.0
 max_trade_notional  = 0.0   # 0 = no cap
+'''
+
+INDICATORS_TEMPLATE = '''# Indicator parameter overrides for ccbalancer.
+# This file is its own concern (kept out of config.toml) and may be rewritten by
+# `ccbalancer indicator set`. Every table and key is optional; omitted ones fall
+# back to built-in defaults. The set of available indicators is fixed in code;
+# discover them and their parameters with `ccbalancer indicators`.
+
+[rsi]
+period     = 14
+overbought = 70.0           # the CLI reports an rsi_zone vs these; it never acts
+oversold   = 30.0
+
+[macd]
+fast   = 12
+slow   = 26
+signal = 9
+
+[ema]
+periods = [12, 26, 200]
+
+[bollinger]
+period = 20
+stddev = 2.0
+
+[atr]
+period = 14
+
+[volume]
+ma_period = 20
+
+[fib]
+ratios = [0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0]
 '''
 
 ENV_TEMPLATE = '''# Secrets for ccbalancer. Never commit this file.

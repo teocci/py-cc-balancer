@@ -6,6 +6,7 @@ from datetime import timezone
 
 import pytest
 
+from ccbalancer.exceptions import ConfigError
 from ccbalancer.utils import money, timeutil
 
 
@@ -58,3 +59,36 @@ def test_hours_between():
     start = '2026-06-18T00:00:00Z'
     end = '2026-06-18T06:30:00Z'
     assert timeutil.hours_between(start, end) == 6.5
+
+
+@pytest.mark.parametrize(
+    'timeframe, seconds',
+    [
+        ('1m', 60),
+        ('5m', 300),
+        ('15m', 900),
+        ('1h', 3600),
+        ('4h', 14400),
+        ('1d', 86400),
+        ('1w', 604800),
+    ],
+)
+def test_timeframe_to_seconds(timeframe, seconds):
+    assert timeutil.timeframe_to_seconds(timeframe) == seconds
+
+
+@pytest.mark.parametrize('bad', ['', 'h', '0m', 'm5', '5y', '1.5h'])
+def test_timeframe_to_seconds_rejects_bad(bad):
+    with pytest.raises(ConfigError):
+        timeutil.timeframe_to_seconds(bad)
+
+
+def test_ms_to_iso_round_trips_through_parse():
+    iso = timeutil.ms_to_iso(1_700_000_000_000)
+    assert iso.endswith('Z')
+    assert int(timeutil.parse_iso(iso).timestamp() * 1000) == 1_700_000_000_000
+
+
+def test_now_ms_is_positive_int():
+    assert isinstance(timeutil.now_ms(), int)
+    assert timeutil.now_ms() > 0

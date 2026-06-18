@@ -1,7 +1,7 @@
 # PROGRESS
 
 **Current version:** 0.1.0 (unreleased)
-**Active phase:** Phase 8 — Market intelligence (OHLCV, indicators, `analyze`)
+**Active phase:** Phase 9 — Decision memory + audit category
 
 ## Phase status
 
@@ -15,7 +15,7 @@
 | 5 | State store + portfolio snapshots | done |
 | 6 | Rebalance decision logic | done |
 | 7 | Read-only CLI (`status`, `plan`) | done |
-| 8 | Market intelligence (OHLCV, indicators, `analyze`) | pending |
+| 8 | Market intelligence (OHLCV, indicators, `analyze`) | done |
 | 9 | Decision memory + audit category | pending |
 | 10 | Execution + safety guardrails + Binance | pending |
 | 11 | Performance & cost-basis (`performance`) | pending |
@@ -30,11 +30,10 @@
 
 ## Next action
 
-Implement Phase 8: market intelligence (the agent's "eyes"). Add `utils/indicators.py` (pure
-`ema`/`rsi`/`macd`/`bollinger`/`atr`/`fib_levels`), `stores/exchange.py` `fetch_ohlcv`,
-`stores/market_cache.py` (cached OHLCV under `~/.ccbalancer/ohlcv/`, TTL/offline fallback),
-`managers/indicators_manager.py` (multi-timeframe `IndicatorSnapshot`s), the `IndicatorSnapshot`
-model, `data_exchange`/`decision_timeframes`/`analysis_timeframes` config, and wire `analyze <pair>
-[--timeframe ...]` in `cli.py`. See `docs/phases/phase-8.md`. DoD: each indicator verified against
-fixed OHLCV fixtures; cache hit/miss/stale/offline paths tested; `analyze BTC/USDT --timeframe 1h
---json` returns a stable, versioned multi-timeframe snapshot; no network in tests.
+Implement Phase 9: decision memory + audit category. Add `stores/decision_store.py` (append-only
+`~/.ccbalancer/decision_log.jsonl`; one record per `decide()` call with inputs + drift + each guard
+pass/fail + proposed/executed order), hook `plan`/`decide()` to append a decision record, and wire
+the **audit** command group in `cli.py` (`decisions`, `history`, `export` — local logs only, no
+network, no side effects) with `--help` grouped by read/write/audit. See `docs/phases/phase-9.md`.
+DoD: every `decide()` appends exactly one record; `decisions`/`history` read it back; records are
+append-only and jq-queryable; JSON carries `schema_version`; audit commands make zero network calls.

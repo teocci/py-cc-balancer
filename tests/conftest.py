@@ -39,9 +39,12 @@ class FakeExchangeStore:
         balance: Balance structure returned by ``fetch_balance``.
         tickers: Symbol-keyed tickers returned by ``fetch_ticker``.
         open_orders: Open orders returned by ``fetch_open_orders``.
+        ohlcv: ``(symbol, timeframe)`` -> candle list returned by ``fetch_ohlcv``.
+        offline: When ``True``, every fetch raises :class:`ExchangeError`.
         created: Orders placed via ``create_order``, in call order.
         cancelled: Cancellations made via ``cancel_order``, in call order.
         markets_loaded: Number of times ``load_markets`` was called.
+        ohlcv_calls: ``(symbol, timeframe, limit)`` tuples seen by ``fetch_ohlcv``.
     '''
 
     def __init__(
@@ -51,14 +54,19 @@ class FakeExchangeStore:
         balance: dict[str, object] | None = None,
         tickers: dict[str, object] | None = None,
         open_orders: list[dict[str, object]] | None = None,
+        ohlcv: dict[tuple[str, str], list[list[float]]] | None = None,
+        offline: bool = False,
     ) -> None:
         self.markets = markets or {}
         self.balance = balance or {'free': {}, 'used': {}, 'total': {}}
         self.tickers = tickers or {}
         self.open_orders = list(open_orders or [])
+        self.ohlcv = ohlcv or {}
+        self.offline = offline
         self.created: list[dict[str, object]] = []
         self.cancelled: list[dict[str, object]] = []
         self.markets_loaded = 0
+        self.ohlcv_calls: list[tuple[str, str, int]] = []
 
     def load_markets(self, reload: bool = False) -> dict[str, object]:
         self.markets_loaded += 1
@@ -77,6 +85,12 @@ class FakeExchangeStore:
         if symbol is None:
             return list(self.open_orders)
         return [order for order in self.open_orders if order.get('symbol') == symbol]
+
+    def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int) -> list[list[float]]:
+        self.ohlcv_calls.append((symbol, timeframe, limit))
+        if self.offline:
+            raise ExchangeError(f'offline: cannot fetch ohlcv {symbol} {timeframe}')
+        return list(self.ohlcv.get((symbol, timeframe), []))
 
     def create_order(
         self,

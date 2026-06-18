@@ -12,6 +12,7 @@ from ccbalancer.models import (
     AssetBalance,
     ExecutionResult,
     HistoryEvent,
+    IndicatorSnapshot,
     PairConfig,
     PairSnapshot,
     ProposedOrder,
@@ -74,3 +75,16 @@ def test_models_construct() -> None:
     HistoryEvent('2026-06-15T09:00:00Z', 'BTC/USDT', 'sell', 0.001, 65000.0, 65.0, 6.0, 'ok', 'bybit', True, 'id', 'submitted')
     ExecutionResult('BTC/USDT', True, 'id', 'submitted', 'ok')
     assert OutputFormat.JSON.value == 'json'
+
+
+def test_indicator_snapshot_constructs_and_is_frozen() -> None:
+    snap = IndicatorSnapshot(
+        symbol='BTC/USDT', timeframe='1h', as_of='2026-06-15T09:00:00Z',
+        candle_count=200, stale=False, close=65000.0, rsi=55.0,
+        macd=12.0, macd_signal=10.0, macd_histogram=2.0,
+        ema={'12': 64900.0}, bollinger_upper=66000.0, bollinger_middle=65000.0,
+        bollinger_lower=64000.0, atr=120.0, fib={'0.618': 63000.0},
+    )
+    assert snap.ema['12'] == 64900.0
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        snap.close = 1.0  # type: ignore[misc]

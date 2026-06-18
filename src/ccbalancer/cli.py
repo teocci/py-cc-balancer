@@ -17,6 +17,7 @@ from ccbalancer import config as config_mod
 from ccbalancer.config import Defaults
 from ccbalancer.constants import (
     HISTORY_FILENAME,
+    OHLCV_DIRNAME,
     PORTFOLIO_FILENAME,
     STATE_FILENAME,
     ExitCode,
@@ -29,12 +30,15 @@ from ccbalancer.exceptions import (
     PortfolioError,
     StateError,
 )
+from ccbalancer.managers.indicators_manager import IndicatorsManager
 from ccbalancer.managers.portfolio_manager import PortfolioManager
 from ccbalancer.managers.rebalance_manager import RebalanceManager
 from ccbalancer.models import PairConfig
 from ccbalancer.stores.exchange import ExchangeStore
+from ccbalancer.stores.market_cache import MarketCache
 from ccbalancer.stores.portfolio_store import PortfolioStore, pair_to_dict
 from ccbalancer.stores.state_store import StateStore
+from ccbalancer.utils import indicator_registry as registry
 from ccbalancer.utils import render
 from ccbalancer.utils.logging import configure_logging
 from ccbalancer.utils.timeutil import now_iso
@@ -62,6 +66,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser('version', parents=[common], help='Print the ccbalancer version.')
     subparsers.add_parser('status', parents=[common], help='Show current vs target allocation per pair.')
     subparsers.add_parser('plan', parents=[common], help='Show rebalance decisions without executing.')
+    _add_analyze_command(subparsers, common)
+    _add_indicator_command(subparsers, common)
     _add_config_command(subparsers, common)
     _add_pair_command(subparsers, common)
     return parser
@@ -97,6 +103,33 @@ def _common_flags() -> argparse.ArgumentParser:
     return common
 
 
+def _add_analyze_command(subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
+    analyze = subparsers.add_parser(
+        'analyze', parents=[common], help='Show market indicators for a pair across timeframes.'
+    )
+    analyze.add_argument('symbol', help='Pair as BASE/QUOTE (e.g. BTC/USDT).')
+    analyze.add_argument(
+        '--timeframe', action='append', metavar='TF',
+        help='Timeframe to analyze, repeatable (default: configured timeframes).',
+    )
+    analyze.add_argument(
+        '--require-fresh', action='store_true', dest='require_fresh',
+        help='Fail a timeframe rather than fall back to a stale cache.',
+    )
+
+
+def _add_indicator_command(subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
+    parser = subparsers.add_parser('indicator', help='List or set indicator parameters.')
+    sub = parser.add_subparsers(dest='indicator_command', metavar='<action>')
+    sub.add_parser('list', parents=[common], help='List indicators, parameters, defaults, and current values.')
+    set_node = sub.add_parser('set', parents=[common], help='Set indicator parameters in indicators.toml.')
+    set_node.add_argument('name', help='Indicator name (see `indicator list`).')
+    set_node.add_argument(
+        'assignments', nargs='+', metavar='KEY=VALUE',
+        help='Parameter assignments, e.g. overbought=63.5 period=14 (lists: periods=12,26,200).',
+    )
+
+
 def _add_config_command(subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
     config_parser = subparsers.add_parser('config', help='Show or initialize configuration.')
     config_sub = config_parser.add_subparsers(dest='config_command', metavar='<action>')
@@ -115,6 +148,12 @@ def _add_pair_command(subparsers: argparse._SubParsersAction, common: argparse.A
         node.add_argument('--band', type=float, help='No-trade band percent.')
         node.add_argument('--min-notional', type=float, dest='min_notional', help='Min order notional.')
         node.add_argument('--max-trade', type=float, dest='max_trade', help='Max trade notional (0 = none).')
+        node.add_argument('--entry-price', type=float, dest='entry_price', help='Entry price (stamps entry time).')
+        node.add_argument('--invested', type=float, dest='invested', help='Invested capital (quote terms).')
+        node.add_argument(
+            '--target-set-price', type=float, dest='target_set_price',
+            help='Price when the target ratio was set (stamps target-set time).',
+        )
     remove = pair_sub.add_parser('remove', parents=[common], help='Remove a pair.')
     remove.add_argument('symbol', help='Pair as BASE/QUOTE (e.g. BTC/USDT).')
 
@@ -126,6 +165,10 @@ def _dispatch(args: argparse.Namespace) -> ExitCode:
         return _cmd_status(args)
     if args.command == 'plan':
         return _cmd_plan(args)
+    if args.command == 'analyze':
+        return _cmd_analyze(args)
+    if args.command == 'indicator':
+        return _cmd_indicator(args)
     if args.command == 'config':
         return _cmd_config(args)
     if args.command == 'pair':
@@ -160,6 +203,82 @@ def _cmd_plan(args: argparse.Namespace) -> ExitCode:
     payload = render.plan_response(decisions, meta)
     _emit(args, payload, render.plan_lines(decisions) or ['(no pairs configured)'])
     return ExitCode.OK
+
+
+def _cmd_analyze(args: argparse.Namespace) -> ExitCode:
+    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    manager = _indicators_manager(config)
+    symbol = args.symbol.upper()
+    timeframes = args.timeframe or _default_timeframes(config)
+    snapshots = manager.snapshots(symbol, timeframes, require_fresh=args.require_fresh)
+    meta = {'exchange': config.data_exchange, 'testnet': config.testnet, 'generated_at': now_iso()}
+    payload = render.analyze_response(symbol, timeframes, snapshots, meta)
+    _emit(args, payload, render.analyze_lines(symbol, timeframes, snapshots))
+    if all(snapshot is None for snapshot in snapshots):
+        return ExitCode.EXCHANGE_ERROR
+    return ExitCode.OK
+
+
+def _default_timeframes(config: config_mod.AppConfig) -> list[str]:
+    '''Decision then analysis timeframes, de-duplicated, order preserved.'''
+    ordered = dict.fromkeys((*config.decision_timeframes, *config.analysis_timeframes))
+    return list(ordered)
+
+
+def _indicators_manager(config: config_mod.AppConfig) -> IndicatorsManager:
+    '''Build the indicators manager (seam for tests to inject a fake).'''
+    data_store = ExchangeStore(
+        exchange_id=config.data_exchange,
+        testnet=config.testnet,
+        timeout_ms=config.http_timeout_ms,
+    )
+    cache = MarketCache(config.app_dir / OHLCV_DIRNAME)
+    return IndicatorsManager(
+        data_store, cache, ohlcv_limit=config.ohlcv_limit, settings=config.indicators
+    )
+
+
+def _cmd_indicator(args: argparse.Namespace) -> ExitCode:
+    if args.indicator_command == 'list':
+        return _cmd_indicator_list(args)
+    if args.indicator_command == 'set':
+        return _cmd_indicator_set(args)
+    _emit(args, {'error': 'specify: indicator list | indicator set'}, ['Usage: indicator list | indicator set <name> KEY=VALUE ...'])
+    return ExitCode.CONFIG_ERROR
+
+
+def _cmd_indicator_list(args: argparse.Namespace) -> ExitCode:
+    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    catalog = registry.describe(config.indicators.values)
+    payload = render.indicator_catalog_response(catalog, now_iso())
+    _emit(args, payload, render.indicator_catalog_lines(catalog))
+    return ExitCode.OK
+
+
+def _cmd_indicator_set(args: argparse.Namespace) -> ExitCode:
+    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    if config.indicators_path is None:
+        raise ConfigError('No indicators.toml location resolved')
+    overrides = config_mod.read_indicator_overrides(config.indicators_path)
+    section = dict(overrides.get(args.name, {}))
+    section.update(_parse_assignments(args.name, args.assignments))
+    overrides[args.name] = section
+    resolved = registry.resolve(overrides)  # validates the merged result
+    config_mod.write_indicator_overrides(config.indicators_path, overrides)
+    params = resolved[args.name]
+    text = f'Updated {args.name}: ' + ', '.join(f'{key}={value}' for key, value in params.items())
+    _emit(args, {'command': 'indicator set', 'indicator': args.name, 'params': params}, [text])
+    return ExitCode.OK
+
+
+def _parse_assignments(name: str, assignments: list[str]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for item in assignments:
+        if '=' not in item:
+            raise ConfigError(f'Invalid assignment {item!r}; expected KEY=VALUE')
+        key, raw = item.split('=', 1)
+        result[key] = registry.coerce_scalar(name, key, raw)
+    return result
 
 
 def _read_context(
@@ -283,6 +402,11 @@ def _build_pair(args: argparse.Namespace, defaults: Defaults) -> PairConfig:
         band_pct=args.band if args.band is not None else defaults.band_pct,
         min_notional=args.min_notional if args.min_notional is not None else defaults.min_notional,
         max_trade_notional=args.max_trade if args.max_trade is not None else defaults.max_trade_notional,
+        entry_price=args.entry_price,
+        entry_ts=now_iso() if args.entry_price is not None else None,
+        invested_capital=args.invested,
+        target_set_price=args.target_set_price,
+        target_set_ts=now_iso() if args.target_set_price is not None else None,
     )
 
 
@@ -297,6 +421,11 @@ def _merge_pair(existing: PairConfig, args: argparse.Namespace) -> PairConfig:
         band_pct=args.band if args.band is not None else existing.band_pct,
         min_notional=args.min_notional if args.min_notional is not None else existing.min_notional,
         max_trade_notional=args.max_trade if args.max_trade is not None else existing.max_trade_notional,
+        entry_price=args.entry_price if args.entry_price is not None else existing.entry_price,
+        entry_ts=now_iso() if args.entry_price is not None else existing.entry_ts,
+        invested_capital=args.invested if args.invested is not None else existing.invested_capital,
+        target_set_price=args.target_set_price if args.target_set_price is not None else existing.target_set_price,
+        target_set_ts=now_iso() if args.target_set_price is not None else existing.target_set_ts,
     )
 
 

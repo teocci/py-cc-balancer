@@ -19,16 +19,26 @@ from typing import TYPE_CHECKING
 from ccbalancer.constants import SCHEMA_VERSION
 
 if TYPE_CHECKING:
-    from ccbalancer.models import PairSnapshot, ProposedOrder, RebalanceDecision
+    from ccbalancer.models import (
+        IndicatorSnapshot,
+        PairSnapshot,
+        ProposedOrder,
+        RebalanceDecision,
+    )
 
 __all__ = [
     'order_to_dict',
     'decision_to_dict',
     'status_to_dict',
+    'indicator_to_dict',
     'plan_response',
     'status_response',
+    'analyze_response',
+    'indicator_catalog_response',
     'plan_lines',
     'status_lines',
+    'analyze_lines',
+    'indicator_catalog_lines',
 ]
 
 # Pairs of (snapshot, decision) carried through the status path.
@@ -80,9 +90,52 @@ def status_to_dict(snapshot: PairSnapshot, decision: RebalanceDecision) -> dict[
     }
 
 
+def indicator_to_dict(snapshot: IndicatorSnapshot) -> dict[str, object]:
+    '''Serialize an :class:`IndicatorSnapshot` with a fixed key order.'''
+    return {
+        'timeframe': snapshot.timeframe,
+        'as_of': snapshot.as_of,
+        'candle_count': snapshot.candle_count,
+        'stale': snapshot.stale,
+        'close': snapshot.close,
+        'rsi': {
+            'value': snapshot.rsi,
+            'overbought': snapshot.rsi_overbought,
+            'oversold': snapshot.rsi_oversold,
+            'zone': snapshot.rsi_zone,
+        },
+        'macd': snapshot.macd,
+        'macd_signal': snapshot.macd_signal,
+        'macd_histogram': snapshot.macd_histogram,
+        'ema': snapshot.ema,
+        'bollinger': {
+            'upper': snapshot.bollinger_upper,
+            'middle': snapshot.bollinger_middle,
+            'lower': snapshot.bollinger_lower,
+        },
+        'atr': snapshot.atr,
+        'volume': snapshot.volume,
+        'volume_ma': snapshot.volume_ma,
+        'fib': snapshot.fib,
+    }
+
+
 def plan_response(decisions: list[RebalanceDecision], meta: dict[str, object]) -> dict[str, object]:
     '''Build the `plan` JSON envelope from per-pair decisions.'''
     return _envelope('plan', meta, {'pairs': [decision_to_dict(d) for d in decisions]})
+
+
+def analyze_response(
+    symbol: str,
+    timeframes: list[str],
+    snapshots: list[IndicatorSnapshot | None],
+    meta: dict[str, object],
+) -> dict[str, object]:
+    '''Build the `analyze` JSON envelope; ``None`` snapshots become unavailable.'''
+    available = [indicator_to_dict(snap) for snap in snapshots if snap is not None]
+    unavailable = [tf for tf, snap in zip(timeframes, snapshots) if snap is None]
+    body = {'symbol': symbol, 'timeframes': available, 'unavailable_timeframes': unavailable}
+    return _envelope('analyze', meta, body)
 
 
 def status_response(rows: list[StatusRow], meta: dict[str, object]) -> dict[str, object]:
@@ -99,6 +152,51 @@ def plan_lines(decisions: list[RebalanceDecision]) -> list[str]:
 def status_lines(rows: list[StatusRow]) -> list[str]:
     '''Render `status` rows as one text line per pair.'''
     return [_status_line(snapshot, decision) for snapshot, decision in rows]
+
+
+def indicator_catalog_response(catalog: list[dict[str, object]], generated_at: str) -> dict[str, object]:
+    '''Build the `indicator list` JSON envelope from the registry catalog.
+
+    Local command (no exchange context), so the envelope is the registry
+    description plus ``schema_version`` for the agent's discovery.
+    '''
+    return {
+        'schema_version': SCHEMA_VERSION,
+        'command': 'indicator list',
+        'generated_at': generated_at,
+        'indicators': catalog,
+    }
+
+
+def indicator_catalog_lines(catalog: list[dict[str, object]]) -> list[str]:
+    '''Render the indicator catalog as text: one header + indented params.'''
+    lines: list[str] = []
+    for indicator in catalog:
+        lines.append(f'{indicator["name"]}  {indicator["description"]}')
+        lines.extend(_param_line(param) for param in indicator['params'])
+    return lines
+
+
+def _param_line(param: dict[str, object]) -> str:
+    return (
+        f'  {param["name"]} = {param["value"]}  '
+        f'({param["type"]}, default {param["default"]})  {param["description"]}'
+    )
+
+
+def analyze_lines(
+    symbol: str,
+    timeframes: list[str],
+    snapshots: list[IndicatorSnapshot | None],
+) -> list[str]:
+    '''Render `analyze` results as a header plus one line per timeframe.'''
+    lines = [symbol]
+    for timeframe, snapshot in zip(timeframes, snapshots):
+        if snapshot is None:
+            lines.append(f'  {timeframe}: (unavailable)')
+        else:
+            lines.append(_analyze_line(snapshot))
+    return lines
 
 
 def _envelope(command: str, meta: dict[str, object], body: dict[str, object]) -> dict[str, object]:
@@ -143,6 +241,20 @@ def _format_last(last_at: str | None, days_since: float | None) -> str:
     if days_since is None:
         return last_at
     return f'{last_at} ({days_since:.1f}d ago)'
+
+
+def _analyze_line(snapshot: IndicatorSnapshot) -> str:
+    flag = ' [stale]' if snapshot.stale else ''
+    zone = f' ({snapshot.rsi_zone})' if snapshot.rsi_zone else ''
+    return (
+        f'  {snapshot.timeframe}  close {_fmt(snapshot.close)}  rsi {_fmt(snapshot.rsi)}{zone}  '
+        f'macd {_fmt(snapshot.macd)}/{_fmt(snapshot.macd_signal)}  atr {_fmt(snapshot.atr)}  '
+        f'vol {_fmt(snapshot.volume)}/{_fmt(snapshot.volume_ma)}  as_of {snapshot.as_of}{flag}'
+    )
+
+
+def _fmt(value: float | None) -> str:
+    return 'n/a' if value is None else f'{value:g}'
 
 
 def _quote(symbol: str) -> str:

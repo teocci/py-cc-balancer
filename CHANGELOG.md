@@ -36,3 +36,24 @@ All notable changes to this project are documented here. Format follows
   with `--pair` filtering and an `_exchange_store` seam for network-free tests;
   `SCHEMA_VERSION` constant. `plan --json` emits the stable contract incl `days_since_last`;
   balanced holdings → all `within_band`, exit 0.
+- Phase 8: market intelligence — `utils/indicators.py` (pure, hand-rolled `sma`, `ema`, `rsi`
+  (Wilder), `macd`, `bollinger`, `atr`, `fib_levels`; None-padded aligned series),
+  `models/IndicatorSnapshot` (frozen+slots; RSI value/thresholds/zone, EMA map, Bollinger,
+  ATR, volume + volume MA, Fib), `stores/exchange.py` `fetch_ohlcv`, `stores/market_cache.py`
+  (cached OHLCV under `~/.ccbalancer/ohlcv/{symbol}/{tf}.jsonl`, timeframe-based freshness +
+  offline fallback), and `managers/indicators_manager.py` (multi-timeframe snapshots resolving
+  fresh-cache-hit → refetch → stale fallback → offline-none).
+  - **Introspectable registry** (`utils/indicator_registry.py`): the catalog of indicators and
+    their parameters (name/type/default/description) — the single source agents query to discover
+    and validate the config surface. Indicator *parameters/thresholds* live in their own
+    `indicators.toml` (kept out of `config.toml`), resolved over registry defaults; RSI thresholds
+    yield a deterministic `rsi_zone` fact (CLI computes the comparison, agent judges).
+  - Commands: `indicator list` (read — serializes the registry + current values) and
+    `indicator set <name> KEY=VALUE…` (write — registry-validated, atomic `indicators.toml`
+    rewrite); `analyze <pair> [--timeframe ...] [--require-fresh]` (stable `schema_version`
+    envelope; `data_exchange` may differ from the trading exchange).
+  - Config: `data_exchange`/`decision_timeframes`/`analysis_timeframes`/`ohlcv_limit`;
+    `PairConfig` cost-basis baselines (`entry_price`/`entry_ts`/`invested_capital`/
+    `target_set_price`/`target_set_ts`) with `pair add/set` flags.
+  - RSI verified against the StockCharts reference (70.53); cache hit/miss/stale/offline and the
+    discover→set→analyze loop covered, no network in tests.

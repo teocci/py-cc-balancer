@@ -27,6 +27,11 @@ class PairConfig:
         band_pct: No-trade band; rebalance only if drift exceeds this.
         min_notional: Configured floor (quote terms) below which no trade.
         max_trade_notional: Optional per-trade cap (quote terms); 0 = no cap.
+        entry_price: Price (quote terms) when the position was first opened.
+        entry_ts: UTC ISO-8601 of the entry, or ``None``.
+        invested_capital: Quote-terms capital committed to the pair, or ``None``.
+        target_set_price: Price when the current target ratio was chosen, or ``None``.
+        target_set_ts: UTC ISO-8601 of when the target was set, or ``None``.
     '''
 
     symbol: str
@@ -35,11 +40,17 @@ class PairConfig:
     band_pct: float
     min_notional: float
     max_trade_notional: float = 0.0
+    entry_price: float | None = None
+    entry_ts: str | None = None
+    invested_capital: float | None = None
+    target_set_price: float | None = None
+    target_set_ts: str | None = None
 
     def __post_init__(self) -> None:
         self._validate_symbol()
         self._validate_ratio()
         self._validate_non_negative()
+        self._validate_baselines()
 
     @property
     def base(self) -> str:
@@ -66,3 +77,8 @@ class PairConfig:
     def _validate_non_negative(self) -> None:
         if min(self.band_pct, self.min_notional, self.max_trade_notional) < 0:
             raise PortfolioError(f'{self.symbol}: band/notional values must be non-negative')
+
+    def _validate_baselines(self) -> None:
+        baselines = (self.entry_price, self.invested_capital, self.target_set_price)
+        if any(value is not None and value < 0 for value in baselines):
+            raise PortfolioError(f'{self.symbol}: entry/invested/target-set values must be non-negative')

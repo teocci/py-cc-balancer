@@ -90,6 +90,14 @@ class ExchangeStore:
         with _translate('fetch open orders'):
             return self.client.fetch_open_orders(symbol)
 
+    def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int) -> list[list[float]]:
+        '''Return up to ``limit`` ``[time, open, high, low, close, volume]`` candles.
+
+        Public market data: no API key required. Candle times are epoch ms.
+        '''
+        with _translate(f'fetch ohlcv {symbol} {timeframe}'):
+            return self.client.fetch_ohlcv(symbol, timeframe, None, limit)
+
     def create_order(
         self,
         symbol: str,
