@@ -24,3 +24,9 @@ All notable changes to this project are documented here. Format follows
   files), `utils/timeutil.py` (UTC ISO-8601 `now_iso`/`parse_iso`/`hours_between`),
   `utils/money.py` (Decimal-backed `precision_to_decimals`/`round_amount`/`notional`), and
   `managers/portfolio_manager.py` (balances + tickers + state → `PairSnapshot`, batched fetch).
+- Phase 6: rebalance decision logic — `managers/rebalance_manager.py`, a pure
+  `RebalanceManager.decide(pair, snapshot)` (no I/O, no mocks) with ordered guards
+  (`ABNORMAL_PRICE` → `MARKET_UNAVAILABLE` → optional `TOO_SOON` → `WITHIN_BAND` →
+  `BELOW_MIN_NOTIONAL` → `INSUFFICIENT_BALANCE` → max-trade clamp → `OK`), signed
+  `drift_pct` sizing for BUY/SELL, passive limit-price offset, and precision-aware
+  amount rounding; `from_config` wires the three relevant settings from `AppConfig`.
