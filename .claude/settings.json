@@ -3,8 +3,8 @@
     "allow": [
       "Bash(ls *.md)",
       "Bash(cat *.md)",
-      "Bash(.venv/Scripts/python -m wb *)",
-      "Bash(.venv/bin/python -m wb *)",
+      "Bash(.venv/Scripts/python -m *)",
+      "Bash(.venv/bin/python -m *)",
       "Bash(xargs ls:*)",
       "Bash(grep *)",
       "Bash(xargs -I {} basename {})",
@@ -42,7 +42,21 @@
       "WebFetch(domain:github.com)",
       "Bash(.venv/Scripts/python)",
       "Bash(Select-Object Name)",
-      "Bash(ConvertTo-Json)"
+      "Bash(ConvertTo-Json)",
+      "Bash(py -3.11 --version)",
+      "Bash(git -C . status --short)",
+      "Bash(py -3.11 -m venv .venv)",
+      "Bash(.venv/Scripts/python --version)",
+      "Bash(.venv/Scripts/python -m pip install --upgrade pip)",
+      "Bash(.venv/Scripts/python -m pip install -e \".[dev]\")",
+      "Bash(.venv/Scripts/ccbalancer version *)",
+      "Bash(git checkout *)",
+      "PowerShell(.venv/Scripts/python -m pytest tests/ -q 2>&1)",
+      "PowerShell(.venv/Scripts/python -m pytest tests/test_render.py tests/test_cli_read.py --cov=ccbalancer.utils.render --cov=ccbalancer.cli --cov-report=term-missing -q 2>&1)",
+      "PowerShell(.venv/Scripts/python -m ccbalancer plan --help 2>&1)",
+      "PowerShell(.venv/Scripts/python -m pytest tests/ -p no:cacheprovider 2>&1)",
+      "PowerShell(\"== commits containing the trailer ==\")",
+      "PowerShell(\"== upstream / remotes ==\")"
     ],
     "additionalDirectories": [
       "d:\\teocci\\code\\python\\py-cc-balanacer\\.claude\\skills",
