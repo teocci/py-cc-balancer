@@ -15,3 +15,7 @@ All notable changes to this project are documented here. Format follows
   discovery, secret masking), `config.example.toml`, `.env.example`, `config show`/`config init`.
 - Phase 3: portfolio store + `pair` commands — `stores/portfolio_store.py` (validated
   CRUD over `portfolio.json`) and `pair list/add/set/remove` CLI.
+- Phase 4: exchange store — `stores/exchange.py`, a thin lazily-built ccxt wrapper
+  (`load_markets`, `fetch_balance`, `fetch_ticker`, `fetch_open_orders`, `create_order`,
+  `cancel_order`) with sandbox toggle and ccxt→domain error translation; `FakeExchangeStore`
+  test double in `conftest.py`. Only module that touches the network.
