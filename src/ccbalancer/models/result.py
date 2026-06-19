@@ -18,6 +18,10 @@ class ExecutionResult:
         status: One of ``'submitted'``, ``'skipped'``, ``'dry_run'``, ``'failed'``.
         reason: Decision reason or failure cause.
         detail: Short, deterministic human-readable note.
+        side: Order side (``'buy'``/``'sell'``) when an order was attempted.
+        amount: Base quantity attempted.
+        price: Limit price attempted, in quote terms.
+        notional: Order value in quote terms.
     '''
 
     symbol: str
@@ -26,3 +30,7 @@ class ExecutionResult:
     status: str
     reason: str
     detail: str = ''
+    side: str | None = None
+    amount: float = 0.0
+    price: float = 0.0
+    notional: float = 0.0

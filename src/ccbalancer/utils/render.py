@@ -16,10 +16,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ccbalancer.constants import SCHEMA_VERSION
+from ccbalancer.constants import CCB_PREFIX, SCHEMA_VERSION
 
 if TYPE_CHECKING:
     from ccbalancer.models import (
+        ExecutionResult,
         IndicatorSnapshot,
         PairSnapshot,
         ProposedOrder,
@@ -31,6 +32,8 @@ __all__ = [
     'decision_to_dict',
     'status_to_dict',
     'indicator_to_dict',
+    'result_to_dict',
+    'open_order_to_dict',
     'plan_response',
     'status_response',
     'analyze_response',
@@ -38,12 +41,20 @@ __all__ = [
     'decisions_response',
     'history_response',
     'export_response',
+    'rebalance_dry_response',
+    'rebalance_exec_response',
+    'orders_response',
+    'cancel_response',
     'plan_lines',
     'status_lines',
     'analyze_lines',
     'indicator_catalog_lines',
     'decisions_lines',
     'history_lines',
+    'rebalance_dry_lines',
+    'rebalance_exec_lines',
+    'orders_lines',
+    'cancel_lines',
 ]
 
 # Pairs of (snapshot, decision) carried through the status path.
@@ -58,6 +69,37 @@ def order_to_dict(order: ProposedOrder) -> dict[str, object]:
         'limit_price': order.limit_price,
         'notional': order.notional,
         'clamped': order.clamped,
+    }
+
+
+def result_to_dict(result: ExecutionResult) -> dict[str, object]:
+    '''Serialize an :class:`ExecutionResult` with a fixed key order.'''
+    return {
+        'symbol': result.symbol,
+        'placed': result.placed,
+        'status': result.status,
+        'reason': result.reason,
+        'side': result.side,
+        'amount': result.amount,
+        'price': result.price,
+        'notional': result.notional,
+        'order_id': result.order_id,
+        'detail': result.detail,
+    }
+
+
+def open_order_to_dict(order: dict[str, object]) -> dict[str, object]:
+    '''Serialize one exchange open order, flagging whether the tool placed it.'''
+    client_id = order.get('clientOrderId')
+    ours = isinstance(client_id, str) and client_id.startswith(CCB_PREFIX)
+    return {
+        'id': order.get('id'),
+        'symbol': order.get('symbol'),
+        'side': order.get('side'),
+        'amount': order.get('amount'),
+        'price': order.get('price'),
+        'client_order_id': client_id,
+        'ours': ours,
     }
 
 
@@ -125,9 +167,18 @@ def indicator_to_dict(snapshot: IndicatorSnapshot) -> dict[str, object]:
     }
 
 
-def plan_response(decisions: list[RebalanceDecision], meta: dict[str, object]) -> dict[str, object]:
-    '''Build the `plan` JSON envelope from per-pair decisions.'''
-    return _envelope('plan', meta, {'pairs': [decision_to_dict(d) for d in decisions]})
+def plan_response(
+    decisions: list[RebalanceDecision],
+    meta: dict[str, object],
+    confirm_token: str | None = None,
+) -> dict[str, object]:
+    '''Build the `plan` JSON envelope from per-pair decisions.
+
+    When any pair is actionable, ``confirm_token`` carries the handshake token the
+    user passes to ``rebalance --execute --confirm``; it is ``None`` for a no-op plan.
+    '''
+    body = {'confirm_token': confirm_token, 'pairs': [decision_to_dict(d) for d in decisions]}
+    return _envelope('plan', meta, body)
 
 
 def analyze_response(
@@ -190,6 +241,43 @@ def export_response(
     return _local_envelope('export', generated_at, body)
 
 
+def rebalance_dry_response(
+    decisions: list[RebalanceDecision], meta: dict[str, object], confirm_token: str | None
+) -> dict[str, object]:
+    '''Build the dry-run `rebalance` envelope: the plan plus its confirm-token.'''
+    body = {
+        'dry_run': True,
+        'confirm_token': confirm_token,
+        'pairs': [decision_to_dict(d) for d in decisions],
+    }
+    return _envelope('rebalance', meta, body)
+
+
+def rebalance_exec_response(
+    results: list[ExecutionResult], meta: dict[str, object], confirm_token: str | None
+) -> dict[str, object]:
+    '''Build the executed `rebalance` envelope from per-pair execution results.'''
+    body = {
+        'dry_run': False,
+        'confirm_token': confirm_token,
+        'results': [result_to_dict(r) for r in results],
+    }
+    return _envelope('rebalance', meta, body)
+
+
+def orders_response(orders: list[dict[str, object]], meta: dict[str, object]) -> dict[str, object]:
+    '''Build the `orders` envelope listing open orders (ours flagged).'''
+    return _envelope('orders', meta, {'orders': [open_order_to_dict(o) for o in orders]})
+
+
+def cancel_response(
+    orders: list[dict[str, object]], meta: dict[str, object], *, dry_run: bool
+) -> dict[str, object]:
+    '''Build the `cancel` envelope: the tool's open orders that were (or would be) cancelled.'''
+    body = {'dry_run': dry_run, 'cancelled': [open_order_to_dict(o) for o in orders]}
+    return _envelope('cancel', meta, body)
+
+
 def decisions_lines(records: list[dict[str, object]]) -> list[str]:
     '''Render logged decisions as one text line per record.'''
     return [_decision_record_line(record) for record in records]
@@ -198,6 +286,34 @@ def decisions_lines(records: list[dict[str, object]]) -> list[str]:
 def history_lines(events: list[dict[str, object]]) -> list[str]:
     '''Render logged rebalance events as one text line per record.'''
     return [_history_event_line(event) for event in events]
+
+
+def rebalance_dry_lines(
+    decisions: list[RebalanceDecision], confirm_token: str | None
+) -> list[str]:
+    '''Render the dry-run `rebalance` plan plus a confirm hint.'''
+    lines = [_plan_line(decision) for decision in decisions]
+    if confirm_token:
+        lines.append(f'(dry-run) confirm with: rebalance --execute --confirm {confirm_token}')
+    else:
+        lines.append('(dry-run) nothing to rebalance')
+    return lines
+
+
+def rebalance_exec_lines(results: list[ExecutionResult]) -> list[str]:
+    '''Render executed `rebalance` results as one text line per pair.'''
+    return [_result_line(result) for result in results]
+
+
+def orders_lines(orders: list[dict[str, object]]) -> list[str]:
+    '''Render open orders as one text line per order.'''
+    return [_open_order_line(order) for order in orders]
+
+
+def cancel_lines(orders: list[dict[str, object]], *, dry_run: bool) -> list[str]:
+    '''Render the orders that were (or, in dry-run, would be) cancelled.'''
+    verb = 'would cancel' if dry_run else 'cancelled'
+    return [f'{verb} {_open_order_line(order)}' for order in orders]
 
 
 def indicator_catalog_lines(catalog: list[dict[str, object]]) -> list[str]:
@@ -270,6 +386,24 @@ def _history_event_line(event: dict[str, object]) -> str:
         f'{event.get("ts")}  {event.get("symbol")}  {event.get("side")} '
         f'{event.get("amount")} @ {event.get("price")} ({notional_str} {quote})  '
         f'[{event.get("reason")}] {event.get("status")}'
+    )
+
+
+def _result_line(result: ExecutionResult) -> str:
+    if result.side is None:
+        return f'{result.symbol}  {result.status}  [{result.reason}]'
+    quote = _quote(result.symbol)
+    return (
+        f'{result.symbol}  {result.status}  {result.side} {result.amount:g} @ '
+        f'{result.price:g} ({result.notional:.2f} {quote})  [{result.reason}]'
+    )
+
+
+def _open_order_line(order: dict[str, object]) -> str:
+    mark = '*' if (str(order.get('clientOrderId') or '')).startswith(CCB_PREFIX) else ' '
+    return (
+        f'{mark} {order.get("symbol")}  {order.get("side")} {order.get("amount")} @ '
+        f'{order.get("price")}  id {order.get("id")}'
     )
 
 

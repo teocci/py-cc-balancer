@@ -16,6 +16,7 @@ __all__ = [
     'InsufficientBalanceError',
     'SanityCheckError',
     'OrderRejectedError',
+    'SafetyError',
 ]
 
 
@@ -49,3 +50,11 @@ class SanityCheckError(AppError):
 
 class OrderRejectedError(AppError):
     '''The exchange rejected an order placement.'''
+
+
+class SafetyError(AppError):
+    '''Execution was refused by a safety guardrail.
+
+    Raised when the kill-switch file is present, the per-run session notional cap
+    would be exceeded, or the confirm-token is missing or does not match the plan.
+    '''

@@ -18,8 +18,10 @@ __all__ = [
     'STATE_FILENAME',
     'HISTORY_FILENAME',
     'DECISION_LOG_FILENAME',
+    'LEDGER_FILENAME',
     'INDICATORS_FILENAME',
     'OHLCV_DIRNAME',
+    'KILL_SWITCH_FILENAME',
     'PROJECT_CONFIG_FILENAME',
     'CCB_PREFIX',
     'ENV_API_KEY',
@@ -33,6 +35,8 @@ __all__ = [
     'DEFAULT_LIMIT_OFFSET_PCT',
     'DEFAULT_MIN_INTERVAL_HOURS',
     'DEFAULT_HTTP_TIMEOUT_MS',
+    'DEFAULT_MAX_SESSION_NOTIONAL_USD',
+    'CONFIRM_TOKEN_LENGTH',
     'DEFAULT_TARGET_VOLATILE_PCT',
     'DEFAULT_TARGET_STABLE_PCT',
     'DEFAULT_BAND_PCT',
@@ -76,6 +80,8 @@ HISTORY_FILENAME = 'history.jsonl'
 # Append-only log of every rebalance decision (inputs + guard ladder + order),
 # written on `plan`/`rebalance`; the offline decision memory read by `decisions`.
 DECISION_LOG_FILENAME = 'decision_log.jsonl'
+# Append-only log of executed fills (price, qty, fee, side); the cost-basis source.
+LEDGER_FILENAME = 'ledger.jsonl'
 # Indicator parameter overrides, kept out of config.toml (own concern, safely
 # machine-rewritable by `indicator set`).
 INDICATORS_FILENAME = 'indicators.toml'
@@ -83,6 +89,9 @@ INDICATORS_FILENAME = 'indicators.toml'
 OHLCV_DIRNAME = 'ohlcv'
 # Project-local config override found in the current working directory.
 PROJECT_CONFIG_FILENAME = 'ccbalancer.toml'
+# Presence of this file under the app dir blocks order placement (a manual abort
+# switch the user can drop in to stop all execution); `cancel` is never blocked.
+KILL_SWITCH_FILENAME = 'STOP'
 
 # Prefix on clientOrderId to recognize orders placed by this tool.
 CCB_PREFIX = 'ccb-'
@@ -101,6 +110,11 @@ DEFAULT_QUOTE_SANITY_PCT = 15.0
 DEFAULT_LIMIT_OFFSET_PCT = 0.0
 DEFAULT_MIN_INTERVAL_HOURS = 0
 DEFAULT_HTTP_TIMEOUT_MS = 10000
+# Per-run cap on total notional placed across all pairs (a safety backstop, since
+# the intent-level confirm-token does not bound magnitude). 0 = unlimited (opt-out).
+DEFAULT_MAX_SESSION_NOTIONAL_USD = 1000.0
+# Hex length of the confirm-token issued by `plan` and required by `rebalance`.
+CONFIRM_TOKEN_LENGTH = 12
 
 # Per-pair defaults (applied when `pair add` omits a field).
 DEFAULT_TARGET_VOLATILE_PCT = 80.0
@@ -158,3 +172,4 @@ class ExitCode(IntEnum):
     EXCHANGE_ERROR = 3
     ORDER_REJECTED = 4
     PARTIAL_FAILURE = 5
+    SAFETY_BLOCKED = 6

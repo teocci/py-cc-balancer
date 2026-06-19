@@ -23,6 +23,7 @@ from ccbalancer.exceptions import (
     InsufficientBalanceError,
     OrderRejectedError,
 )
+from ccbalancer.stores.exchange_quirks import ExchangeQuirks, quirks_for
 
 if TYPE_CHECKING:
     from ccbalancer.config import AppConfig
@@ -70,6 +71,11 @@ class ExchangeStore:
             self._client = self._build_client()
         return self._client
 
+    @property
+    def quirks(self) -> ExchangeQuirks:
+        '''Execution quirks for this exchange (raises if not tradable).'''
+        return quirks_for(self.exchange_id)
+
     def load_markets(self, reload: bool = False) -> dict[str, object]:
         '''Load and return the exchange's markets keyed by symbol.'''
         with _translate('load markets'):
@@ -106,10 +112,15 @@ class ExchangeStore:
         price: float,
         client_order_id: str | None = None,
     ) -> dict[str, object]:
-        '''Place a limit order, tagging it with ``client_order_id`` if given.'''
+        '''Place a limit order, tagging it with ``client_order_id`` if given.
+
+        The tag is carried in the params key this exchange expects (see
+        :mod:`ccbalancer.stores.exchange_quirks`) and truncated to its length limit.
+        '''
         params: dict[str, object] = {}
         if client_order_id is not None:
-            params['clientOrderId'] = client_order_id
+            quirks = self.quirks
+            params[quirks.client_order_id_param] = client_order_id[: quirks.max_client_order_id_len]
         with _translate(f'create order {symbol}'):
             return self.client.create_order(
                 symbol, _LIMIT_ORDER_TYPE, side.value, amount, price, params

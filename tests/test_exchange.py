@@ -8,10 +8,12 @@ on the ``ccxt`` module so ``set_sandbox_mode`` and options can be asserted.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import ccxt
 import pytest
 
-from ccbalancer.config import AppConfig, Defaults
+from ccbalancer.config import AppConfig, Defaults, SafetyConfig
 from ccbalancer.enums.side import OrderSide
 from ccbalancer.exceptions import (
     ExchangeError,
@@ -172,6 +174,7 @@ def test_from_config_maps_fields():
         analysis_timeframes=('1h', '4h', '1d', '1w'),
         ohlcv_limit=500,
         defaults=Defaults(80.0, 20.0, 5.0, 10.0, 0.0),
+        safety=SafetyConfig(1000.0, Path('STOP')),
         api_key='key',
         api_secret='secret',
         app_dir=None,

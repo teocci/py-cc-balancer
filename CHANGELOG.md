@@ -68,3 +68,20 @@ All notable changes to this project are documented here. Format follows
     `history` replay their logs (stable envelope, `--pair` filter, text or `--json`); `export` bundles
     both as one JSON document (always JSON). Top-level `--help` now groups commands by read/write/audit.
   - Audit network-freeness enforced in tests via an `_exchange_store` seam that raises if touched.
+- Phase 10: execution + safety guardrails + Binance — `managers/execution_manager.py` runs the
+  cancel-and-replace flow (cancel our own stale `CCB_PREFIX` orders → place one tagged limit order
+  per actionable decision → persist `state.json` + append `history.jsonl` + `ledger.jsonl` + a
+  `rebalance` decision-log record); re-runs are idempotent. `stores/ledger_store.py` and the
+  frozen+slots `Fill` model own the append-only `~/.ccbalancer/ledger.jsonl` (the cost-basis source).
+  - **Safety guardrails:** `rebalance` is dry-run by default (writes nothing) and only executes with
+    `--execute`; an intent-level **confirm-token** (digest of exchange + testnet + each actionable
+    pair's `symbol:side`, stable across price drift) is issued by `plan`/dry-run and required by
+    `--execute --confirm`; a per-run `[safety].max_session_notional_usd` cap (default 1000, `0` =
+    unlimited) bounds total placed notional; a `~/.ccbalancer/STOP` **kill-switch** file blocks
+    placement (never `cancel`); execution requires trade-only credentials. New `SafetyConfig`,
+    `SafetyError`, and exit code `SAFETY_BLOCKED` (6).
+  - **Binance** enabled alongside Bybit via `stores/exchange_quirks.py` (a tested per-exchange matrix
+    for the clientOrderId param, tag-length limit, and cancel semantics), consulted by `ExchangeStore`.
+  - New CLI: `rebalance` (write, guarded), `orders` (read, flags our open orders), `cancel`
+    (write, dry-run by default, kill-switch-exempt). Exit codes: `OK`/`PARTIAL_FAILURE`/
+    `ORDER_REJECTED` from execution results, `SAFETY_BLOCKED` from a tripped guardrail.

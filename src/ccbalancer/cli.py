@@ -18,6 +18,7 @@ from ccbalancer.config import Defaults
 from ccbalancer.constants import (
     DECISION_LOG_FILENAME,
     HISTORY_FILENAME,
+    LEDGER_FILENAME,
     OHLCV_DIRNAME,
     PORTFOLIO_FILENAME,
     STATE_FILENAME,
@@ -29,14 +30,22 @@ from ccbalancer.exceptions import (
     ExchangeError,
     OrderRejectedError,
     PortfolioError,
+    SafetyError,
     StateError,
+)
+from ccbalancer.managers.execution_manager import (
+    ExecutionManager,
+    confirm_token,
+    kill_switch_active,
+    session_notional,
 )
 from ccbalancer.managers.indicators_manager import IndicatorsManager
 from ccbalancer.managers.portfolio_manager import PortfolioManager
 from ccbalancer.managers.rebalance_manager import RebalanceManager
-from ccbalancer.models import PairConfig
+from ccbalancer.models import ExecutionResult, PairConfig
 from ccbalancer.stores.decision_store import DecisionStore
 from ccbalancer.stores.exchange import ExchangeStore
+from ccbalancer.stores.ledger_store import LedgerStore
 from ccbalancer.stores.market_cache import MarketCache
 from ccbalancer.stores.portfolio_store import PortfolioStore, pair_to_dict
 from ccbalancer.stores.state_store import StateStore
@@ -55,6 +64,7 @@ _EXIT_BY_ERROR: dict[type[AppError], ExitCode] = {
     StateError: ExitCode.CONFIG_ERROR,
     ExchangeError: ExitCode.EXCHANGE_ERROR,
     OrderRejectedError: ExitCode.ORDER_REJECTED,
+    SafetyError: ExitCode.SAFETY_BLOCKED,
 }
 
 
@@ -62,9 +72,11 @@ _EXIT_BY_ERROR: dict[type[AppError], ExitCode] = {
 # (live data, no writes) from write (mutates/places orders) from audit (local
 # logs only, no network).
 _COMMAND_TAXONOMY = '''command categories:
-  read   (live data, no side effects):  status, plan, analyze, indicator list, version
-  write  (mutate state / place orders):  pair, indicator set, config
-  audit  (local logs only, no network):  decisions, history, export'''
+  read   (live data, no side effects):  status, plan, analyze, indicator list, orders, version
+  write  (mutate state / place orders):  rebalance, cancel, pair, indicator set, config
+  audit  (local logs only, no network):  decisions, history, export
+
+rebalance is dry-run by default; pass --execute --confirm <token> (from plan) to place orders.'''
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -80,12 +92,31 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser('version', parents=[common], help='Print the ccbalancer version.')
     subparsers.add_parser('status', parents=[common], help='Show current vs target allocation per pair.')
     subparsers.add_parser('plan', parents=[common], help='Show rebalance decisions without executing.')
+    _add_execution_commands(subparsers, common)
     _add_analyze_command(subparsers, common)
     _add_indicator_command(subparsers, common)
     _add_config_command(subparsers, common)
     _add_pair_command(subparsers, common)
     _add_audit_commands(subparsers, common)
     return parser
+
+
+def _add_execution_commands(subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
+    rebalance = subparsers.add_parser(
+        'rebalance', parents=[common],
+        help='Place rebalance orders (dry-run by default; needs --execute --confirm).',
+    )
+    rebalance.add_argument(
+        '--execute', action='store_true', help='Place orders (default: dry-run, writes nothing).'
+    )
+    rebalance.add_argument(
+        '--confirm', metavar='TOKEN', help='Confirm-token from a prior plan/dry-run (required with --execute).'
+    )
+    subparsers.add_parser('orders', parents=[common], help='List open orders (this tool\'s are flagged).')
+    cancel = subparsers.add_parser(
+        'cancel', parents=[common], help='Cancel this tool\'s open orders (dry-run by default).'
+    )
+    cancel.add_argument('--execute', action='store_true', help='Actually cancel (default: dry-run).')
 
 
 def _add_audit_commands(subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
@@ -192,6 +223,12 @@ def _dispatch(args: argparse.Namespace) -> ExitCode:
         return _cmd_status(args)
     if args.command == 'plan':
         return _cmd_plan(args)
+    if args.command == 'rebalance':
+        return _cmd_rebalance(args)
+    if args.command == 'orders':
+        return _cmd_orders(args)
+    if args.command == 'cancel':
+        return _cmd_cancel(args)
     if args.command == 'analyze':
         return _cmd_analyze(args)
     if args.command == 'indicator':
@@ -234,7 +271,8 @@ def _cmd_plan(args: argparse.Namespace) -> ExitCode:
         for pair, snapshot in zip(pairs, snapshots)
     ]
     _record_decisions(decision_store, decisions, meta)
-    payload = render.plan_response(decisions, meta)
+    token = confirm_token(decisions, exchange=str(meta['exchange']), testnet=bool(meta['testnet']))
+    payload = render.plan_response(decisions, meta, token)
     _emit(args, payload, render.plan_lines(decisions) or ['(no pairs configured)'])
     return ExitCode.OK
 
@@ -249,6 +287,126 @@ def _record_decisions(store: DecisionStore, decisions: list, meta: dict[str, obj
             testnet=bool(meta['testnet']),
             command='plan',
         )
+
+
+def _cmd_rebalance(args: argparse.Namespace) -> ExitCode:
+    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    pairs, portfolio_mgr, rebalance_mgr, exchange, state = _execution_context(config, args.pair)
+    meta = _live_meta(config)
+    snapshots = portfolio_mgr.snapshots(pairs)
+    decisions = [
+        rebalance_mgr.decide(pair, snapshot, now=str(meta['generated_at']))
+        for pair, snapshot in zip(pairs, snapshots)
+    ]
+    token = confirm_token(decisions, exchange=config.exchange, testnet=config.testnet)
+    if not args.execute:
+        payload = render.rebalance_dry_response(decisions, meta, token)
+        _emit(args, payload, render.rebalance_dry_lines(decisions, token))
+        return ExitCode.OK
+    _enforce_safety(config, args, decisions, token)
+    manager = _build_execution_manager(config, exchange, state)
+    results = manager.execute(decisions, now=str(meta['generated_at']))
+    _emit(args, render.rebalance_exec_response(results, meta, token), render.rebalance_exec_lines(results))
+    return _exit_for_results(results)
+
+
+def _enforce_safety(
+    config: config_mod.AppConfig,
+    args: argparse.Namespace,
+    decisions: list,
+    token: str | None,
+) -> None:
+    '''Enforce the execution guardrails; raise :class:`SafetyError` to block.'''
+    if token is None:
+        return  # nothing actionable: --execute is a harmless no-op
+    if kill_switch_active(config.safety.kill_switch_path):
+        raise SafetyError(
+            f'Kill-switch present at {config.safety.kill_switch_path}; remove it to execute'
+        )
+    if args.confirm != token:
+        raise SafetyError(
+            'Confirm-token missing or stale; re-run plan/dry-run and pass --confirm <token>'
+        )
+    cap = config.safety.max_session_notional_usd
+    total = session_notional(decisions)
+    if cap > 0 and total > cap:
+        raise SafetyError(
+            f'Session notional {total:.2f} exceeds cap {cap:.2f}; '
+            f'raise [safety].max_session_notional_usd to proceed'
+        )
+    config_mod.require_credentials(config)
+
+
+def _exit_for_results(results: list[ExecutionResult]) -> ExitCode:
+    '''Map execution results to an exit code (partial vs total failure).'''
+    failed = [r for r in results if r.status == 'failed']
+    if not failed:
+        return ExitCode.OK
+    if any(r.placed for r in results):
+        return ExitCode.PARTIAL_FAILURE
+    return ExitCode.ORDER_REJECTED
+
+
+def _cmd_orders(args: argparse.Namespace) -> ExitCode:
+    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    config_mod.require_credentials(config)
+    exchange = _exchange_store(config)
+    orders = _open_orders(exchange, args.pair)
+    _emit(args, render.orders_response(orders, _live_meta(config)),
+          render.orders_lines(orders) or ['(no open orders)'])
+    return ExitCode.OK
+
+
+def _cmd_cancel(args: argparse.Namespace) -> ExitCode:
+    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    config_mod.require_credentials(config)
+    exchange = _exchange_store(config)
+    state = StateStore(config.app_dir / STATE_FILENAME, config.app_dir / HISTORY_FILENAME)
+    manager = _build_execution_manager(config, exchange, state)
+    symbols = [s.upper() for s in args.pair] if args.pair else None
+    orders = manager.owned_open_orders(symbols)
+    if args.execute:
+        orders = manager.cancel_orders(orders)
+    meta = _live_meta(config)
+    empty = ['(dry-run) no orders to cancel' if not args.execute else '(no orders to cancel)']
+    _emit(args, render.cancel_response(orders, meta, dry_run=not args.execute),
+          render.cancel_lines(orders, dry_run=not args.execute) or empty)
+    return ExitCode.OK
+
+
+def _execution_context(
+    config: config_mod.AppConfig, requested: list[str] | None
+) -> tuple[list[PairConfig], PortfolioManager, RebalanceManager, ExchangeStore, StateStore]:
+    '''Resolve the pairs, managers, and stores the execution path needs.'''
+    portfolio = PortfolioStore(config.app_dir / PORTFOLIO_FILENAME)
+    pairs = _selected_pairs(portfolio, requested)
+    state = StateStore(config.app_dir / STATE_FILENAME, config.app_dir / HISTORY_FILENAME)
+    exchange = _exchange_store(config)
+    return pairs, PortfolioManager(exchange, state), RebalanceManager.from_config(config), exchange, state
+
+
+def _build_execution_manager(
+    config: config_mod.AppConfig, exchange: ExchangeStore, state: StateStore
+) -> ExecutionManager:
+    return ExecutionManager(
+        exchange=exchange,
+        state_store=state,
+        ledger_store=LedgerStore(config.app_dir / LEDGER_FILENAME),
+        decision_store=DecisionStore(config.app_dir / DECISION_LOG_FILENAME),
+        exchange_id=config.exchange,
+        testnet=config.testnet,
+    )
+
+
+def _open_orders(exchange: ExchangeStore, requested: list[str] | None) -> list[dict[str, object]]:
+    if not requested:
+        return exchange.fetch_open_orders(None)
+    symbols = dict.fromkeys(symbol.upper() for symbol in requested)
+    return [order for symbol in symbols for order in exchange.fetch_open_orders(symbol)]
+
+
+def _live_meta(config: config_mod.AppConfig) -> dict[str, object]:
+    return {'exchange': config.exchange, 'testnet': config.testnet, 'generated_at': now_iso()}
 
 
 def _cmd_analyze(args: argparse.Namespace) -> ExitCode:

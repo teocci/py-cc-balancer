@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from ccbalancer.config import AppConfig, Defaults
+from ccbalancer.config import AppConfig, Defaults, SafetyConfig
 from ccbalancer.enums.side import OrderSide
 from ccbalancer.enums.skip_reason import SkipReason
 from ccbalancer.managers.rebalance_manager import RebalanceManager
@@ -261,6 +263,7 @@ def test_from_config_copies_relevant_settings():
         analysis_timeframes=('1h', '4h', '1d', '1w'),
         ohlcv_limit=500,
         defaults=Defaults(80.0, 20.0, 5.0, 10.0, 0.0),
+        safety=SafetyConfig(1000.0, Path('STOP')),
         api_key=None,
         api_secret=None,
         app_dir=None,

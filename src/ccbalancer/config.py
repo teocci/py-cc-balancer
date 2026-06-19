@@ -25,6 +25,7 @@ from ccbalancer.utils import indicator_registry as registry
 
 __all__ = [
     'Defaults',
+    'SafetyConfig',
     'IndicatorSettings',
     'AppConfig',
     'load_config',
@@ -47,6 +48,20 @@ class Defaults:
     band_pct: float
     min_notional: float
     max_trade_notional: float
+
+
+@dataclass(slots=True, frozen=True)
+class SafetyConfig:
+    '''Execution safety guardrails (the ``[safety]`` config section).
+
+    Attributes:
+        max_session_notional_usd: Per-run cap on total notional placed across all
+            pairs; ``0`` disables the cap (opt-out, unlimited).
+        kill_switch_path: File whose presence aborts order placement.
+    '''
+
+    max_session_notional_usd: float
+    kill_switch_path: Path
 
 
 @dataclass(slots=True, frozen=True)
@@ -99,6 +114,7 @@ class AppConfig:
         indicators_path: Location of ``indicators.toml`` (read/written by the
             indicator commands), or ``None`` in synthetic configs.
         indicators: Resolved indicator parameters and thresholds.
+        safety: Execution safety guardrails.
     '''
 
     exchange: str
@@ -112,6 +128,7 @@ class AppConfig:
     analysis_timeframes: tuple[str, ...]
     ohlcv_limit: int
     defaults: Defaults
+    safety: SafetyConfig
     api_key: str | None
     api_secret: str | None
     app_dir: Path
@@ -167,6 +184,7 @@ def load_config(
     config_path = discover_config_path(cli_config, app_dir)
     glob = _read_section(config_path, 'global')
     defaults = _build_defaults(_read_section(config_path, 'defaults'))
+    safety = _build_safety(_read_section(config_path, 'safety'), app_dir)
 
     exchange = (exchange_override or os.getenv(c.ENV_EXCHANGE) or glob.get('exchange', c.DEFAULT_EXCHANGE)).lower()
     _validate_exchange(exchange)
@@ -186,6 +204,7 @@ def load_config(
         analysis_timeframes=_resolve_timeframes(glob, 'analysis_timeframes', c.DEFAULT_ANALYSIS_TIMEFRAMES),
         ohlcv_limit=int(glob.get('ohlcv_limit', c.DEFAULT_OHLCV_LIMIT)),
         defaults=defaults,
+        safety=safety,
         api_key=os.getenv(c.ENV_API_KEY),
         api_secret=os.getenv(c.ENV_API_SECRET),
         app_dir=app_dir,
@@ -228,6 +247,10 @@ def masked_summary(config: AppConfig) -> dict[str, object]:
             'band_pct': config.defaults.band_pct,
             'min_notional': config.defaults.min_notional,
             'max_trade_notional': config.defaults.max_trade_notional,
+        },
+        'safety': {
+            'max_session_notional_usd': config.safety.max_session_notional_usd,
+            'kill_switch_path': str(config.safety.kill_switch_path),
         },
         'api_key': _mask(config.api_key),
         'api_secret': _mask(config.api_secret),
@@ -282,6 +305,17 @@ def _build_defaults(section: dict[str, object]) -> Defaults:
         band_pct=float(section.get('band_pct', c.DEFAULT_BAND_PCT)),
         min_notional=float(section.get('min_notional', c.DEFAULT_MIN_NOTIONAL)),
         max_trade_notional=float(section.get('max_trade_notional', c.DEFAULT_MAX_TRADE_NOTIONAL)),
+    )
+
+
+def _build_safety(section: dict[str, object], app_dir: Path) -> SafetyConfig:
+    raw_switch = section.get('kill_switch_path')
+    kill_switch_path = Path(str(raw_switch)) if raw_switch else app_dir / c.KILL_SWITCH_FILENAME
+    return SafetyConfig(
+        max_session_notional_usd=float(
+            section.get('max_session_notional_usd', c.DEFAULT_MAX_SESSION_NOTIONAL_USD)
+        ),
+        kill_switch_path=kill_switch_path,
     )
 
 
@@ -413,6 +447,11 @@ target_stable_pct   = 20.0
 band_pct            = 5.0
 min_notional        = 10.0
 max_trade_notional  = 0.0   # 0 = no cap
+
+[safety]                    # execution guardrails (rebalance is dry-run by default)
+max_session_notional_usd = 1000.0   # per-run cap on total notional placed; 0 = unlimited
+# kill_switch_path = ''     # defaults to ~/.ccbalancer/STOP; create it to block all placement
+# Use a trade-only API key (no withdrawal scope) for CCB_API_KEY / CCB_API_SECRET.
 '''
 
 INDICATORS_TEMPLATE = '''# Indicator parameter overrides for ccbalancer.

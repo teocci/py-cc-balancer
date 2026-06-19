@@ -1,7 +1,7 @@
 # PROGRESS
 
 **Current version:** 0.1.0 (unreleased)
-**Active phase:** Phase 10 — Execution + safety guardrails + Binance
+**Active phase:** Phase 11 — Performance & cost-basis (`performance`)
 
 ## Phase status
 
@@ -17,7 +17,7 @@
 | 7 | Read-only CLI (`status`, `plan`) | done |
 | 8 | Market intelligence (OHLCV, indicators, `analyze`) | done |
 | 9 | Decision memory + audit category | done |
-| 10 | Execution + safety guardrails + Binance | pending |
+| 10 | Execution + safety guardrails + Binance | done |
 | 11 | Performance & cost-basis (`performance`) | pending |
 | 12 | Regime signal + agent flags/milestones | pending |
 | 13 | Hardening & docs finalize | pending |
@@ -30,16 +30,18 @@
 
 ## Next action
 
-Implement Phase 10: execution + safety guardrails + Binance. Add `managers/execution_manager.py`
-(cancel stale `CCB_PREFIX` orders, price limits from bid/ask + offset, place tagged orders, persist
-`state.json` + append `history.jsonl`) and `stores/ledger_store.py` (`ledger.jsonl` fills). Add the
-DoD-blocking safety guardrails (`rebalance` dry-run by default, per-run `max_session_notional_usd`
-cap, confirm-token issued by `plan` and required by `rebalance`, kill-switch file, trade-only key
-scoping), enable Binance alongside Bybit with a per-exchange quirks matrix, and wire
-`rebalance`/`orders`/`cancel` in `cli.py`. See `docs/phases/phase-10.md`. DoD: `rebalance --dry-run`
-writes nothing and is the default; execution refuses without explicit flag/confirm-token; session cap
-+ kill-switch block; testnet `rebalance` places/cancels exactly the planned orders and updates state +
-history + ledger; re-run idempotent; both exchanges pass the quirks matrix; exit codes correct.
+Implement Phase 11: performance & cost-basis (`performance`). Add `managers/performance_manager.py`
+(ledger + tickers → realized/unrealized P&L and ROI per pair, from the append-only `ledger.jsonl` true
+cost-basis) and the `performance [--pair] [--history]` command. See `docs/phases/phase-11.md`.
+
+> Phase 10 (done): `managers/execution_manager.py` runs cancel-and-replace (cancel own stale
+> `CCB_PREFIX` orders → place one tagged limit order per actionable decision → persist `state.json` +
+> append `history.jsonl` + `ledger.jsonl` + a `rebalance` decision-log record); idempotent re-runs.
+> `stores/ledger_store.py` + `Fill` model own the cost-basis ledger. Safety guardrails: `rebalance`
+> dry-run by default, intent-level confirm-token (issued by `plan`, required by `--execute --confirm`),
+> `[safety].max_session_notional_usd` cap (default 1000, 0 = unlimited), `STOP` kill-switch (exempts
+> `cancel`), trade-only creds; `SafetyConfig`/`SafetyError`/`SAFETY_BLOCKED` (exit 6). Binance enabled
+> via `stores/exchange_quirks.py` (tested matrix). New CLI: `rebalance`/`orders`/`cancel`.
 
 > Phase 9 (done): `stores/decision_store.py` append-only `decision_log.jsonl` (one jq-queryable record
 > per decision: inputs + drift + guard ladder + order, `schema_version`); `plan` appends per pair while
