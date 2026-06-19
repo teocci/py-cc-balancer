@@ -85,3 +85,17 @@ All notable changes to this project are documented here. Format follows
   - New CLI: `rebalance` (write, guarded), `orders` (read, flags our open orders), `cancel`
     (write, dry-run by default, kill-switch-exempt). Exit codes: `OK`/`PARTIAL_FAILURE`/
     `ORDER_REJECTED` from execution results, `SAFETY_BLOCKED` from a tripped guardrail.
+- Phase 11: performance & cost-basis — `managers/performance_manager.py` walks the append-only
+  `ledger.jsonl` with the **average-cost** method (all money math via `Decimal`, exact to the cent) and
+  marks the held position to market with live tickers, computing realized P&L per sell, unrealized P&L
+  of the open position, fees, and ROI — per pair and across the portfolio (`portfolio_totals`). The
+  frozen+slots `models/PerformanceSnapshot` carries each pair's P&L. Fees are normalized to quote terms
+  (a base-denominated fee is valued at its fill price; a quote/None/other fee is taken as-is) so
+  accounting is deterministic with no extra price lookups.
+  - **Baseline fallback:** a pair with no fills falls back to its `entry_price`/`invested_capital`
+    baseline (synthesizing a position) so unrealized P&L is still meaningful on an empty ledger; ROI's
+    denominator is the pinned `invested_capital` when set, otherwise cumulative gross buy cost.
+  - Commands: `performance [--pair]` (read — live tickers, per-pair + portfolio totals in a stable
+    `schema_version` envelope) and `performance --history` (audit — replays realized P&L per symbol
+    from the ledger only, with the per-fill trade timeline; zero network). Top-level `--help` taxonomy
+    updated. Network-freeness of `--history` enforced in tests via the raising `_exchange_store` seam.

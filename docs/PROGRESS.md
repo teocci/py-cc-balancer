@@ -1,7 +1,7 @@
 # PROGRESS
 
 **Current version:** 0.1.0 (unreleased)
-**Active phase:** Phase 11 — Performance & cost-basis (`performance`)
+**Active phase:** Phase 12 — Regime signal + agent flags/milestones
 
 ## Phase status
 
@@ -18,7 +18,7 @@
 | 8 | Market intelligence (OHLCV, indicators, `analyze`) | done |
 | 9 | Decision memory + audit category | done |
 | 10 | Execution + safety guardrails + Binance | done |
-| 11 | Performance & cost-basis (`performance`) | pending |
+| 11 | Performance & cost-basis (`performance`) | done |
 | 12 | Regime signal + agent flags/milestones | pending |
 | 13 | Hardening & docs finalize | pending |
 | 14 | Packaging, portable bundle & release CI | pending |
@@ -30,9 +30,19 @@
 
 ## Next action
 
-Implement Phase 11: performance & cost-basis (`performance`). Add `managers/performance_manager.py`
-(ledger + tickers → realized/unrealized P&L and ROI per pair, from the append-only `ledger.jsonl` true
-cost-basis) and the `performance [--pair] [--history]` command. See `docs/phases/phase-11.md`.
+Implement Phase 12: regime signal + agent flags/milestones. Add `managers/regime_manager.py`
+(price-variance-since-target-set → flag + heuristic-suggested ratio(s) + what-if scenarios), the
+`regime [--pair]` command, `stores/flags_store.py` + `Milestone` model, `managers/flags_manager.py`,
+and the `flag (add/list/remove)` commands. See `docs/phases/phase-12.md`.
+
+> Phase 11 (done): `managers/performance_manager.py` walks the append-only `ledger.jsonl` with the
+> average-cost method (Decimal math) and marks the held position to market via live tickers, computing
+> realized P&L per sell, unrealized P&L of the open position, fees (normalized to quote terms;
+> base-denominated fees valued at fill price), and ROI — per pair and across the portfolio
+> (`portfolio_totals`). `models/PerformanceSnapshot` (frozen+slots) carries the per-pair P&L.
+> Empty-ledger pairs fall back to the `entry_price`/`invested_capital` baseline so unrealized stays
+> meaningful. `performance [--pair]` (read, live) and `performance --history` (audit, ledger-only,
+> zero network) wired in `cli.py`; stable `schema_version` envelope. ROI exact to the cent.
 
 > Phase 10 (done): `managers/execution_manager.py` runs cancel-and-replace (cancel own stale
 > `CCB_PREFIX` orders → place one tagged limit order per actionable decision → persist `state.json` +

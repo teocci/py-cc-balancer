@@ -40,6 +40,7 @@ from ccbalancer.managers.execution_manager import (
     session_notional,
 )
 from ccbalancer.managers.indicators_manager import IndicatorsManager
+from ccbalancer.managers.performance_manager import PerformanceManager, portfolio_totals
 from ccbalancer.managers.portfolio_manager import PortfolioManager
 from ccbalancer.managers.rebalance_manager import RebalanceManager
 from ccbalancer.models import ExecutionResult, PairConfig
@@ -72,9 +73,9 @@ _EXIT_BY_ERROR: dict[type[AppError], ExitCode] = {
 # (live data, no writes) from write (mutates/places orders) from audit (local
 # logs only, no network).
 _COMMAND_TAXONOMY = '''command categories:
-  read   (live data, no side effects):  status, plan, analyze, indicator list, orders, version
+  read   (live data, no side effects):  status, plan, analyze, indicator list, performance, orders, version
   write  (mutate state / place orders):  rebalance, cancel, pair, indicator set, config
-  audit  (local logs only, no network):  decisions, history, export
+  audit  (local logs only, no network):  decisions, history, performance --history, export
 
 rebalance is dry-run by default; pass --execute --confirm <token> (from plan) to place orders.'''
 
@@ -93,6 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser('status', parents=[common], help='Show current vs target allocation per pair.')
     subparsers.add_parser('plan', parents=[common], help='Show rebalance decisions without executing.')
     _add_execution_commands(subparsers, common)
+    _add_performance_command(subparsers, common)
     _add_analyze_command(subparsers, common)
     _add_indicator_command(subparsers, common)
     _add_config_command(subparsers, common)
@@ -117,6 +119,17 @@ def _add_execution_commands(subparsers: argparse._SubParsersAction, common: argp
         'cancel', parents=[common], help='Cancel this tool\'s open orders (dry-run by default).'
     )
     cancel.add_argument('--execute', action='store_true', help='Actually cancel (default: dry-run).')
+
+
+def _add_performance_command(subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
+    performance = subparsers.add_parser(
+        'performance', parents=[common],
+        help='Show cost-basis P&L and ROI per pair (--history for the ledger replay).',
+    )
+    performance.add_argument(
+        '--history', action='store_true',
+        help='Replay realized P&L from the local ledger only (no network).',
+    )
 
 
 def _add_audit_commands(subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
@@ -229,6 +242,8 @@ def _dispatch(args: argparse.Namespace) -> ExitCode:
         return _cmd_orders(args)
     if args.command == 'cancel':
         return _cmd_cancel(args)
+    if args.command == 'performance':
+        return _cmd_performance(args)
     if args.command == 'analyze':
         return _cmd_analyze(args)
     if args.command == 'indicator':
@@ -407,6 +422,36 @@ def _open_orders(exchange: ExchangeStore, requested: list[str] | None) -> list[d
 
 def _live_meta(config: config_mod.AppConfig) -> dict[str, object]:
     return {'exchange': config.exchange, 'testnet': config.testnet, 'generated_at': now_iso()}
+
+
+def _cmd_performance(args: argparse.Namespace) -> ExitCode:
+    if args.history:
+        return _cmd_performance_history(args)
+    return _cmd_performance_live(args)
+
+
+def _cmd_performance_live(args: argparse.Namespace) -> ExitCode:
+    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    portfolio = PortfolioStore(config.app_dir / PORTFOLIO_FILENAME)
+    pairs = _selected_pairs(portfolio, args.pair)
+    ledger = LedgerStore(config.app_dir / LEDGER_FILENAME)
+    manager = PerformanceManager(ledger, _exchange_store(config))
+    snapshots = manager.snapshots(pairs)
+    totals = portfolio_totals(snapshots)
+    payload = render.performance_response(snapshots, totals, _live_meta(config))
+    _emit(args, payload, render.performance_lines(snapshots, totals) or ['(no pairs configured)'])
+    return ExitCode.OK
+
+
+def _cmd_performance_history(args: argparse.Namespace) -> ExitCode:
+    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    ledger = LedgerStore(config.app_dir / LEDGER_FILENAME)
+    manager = PerformanceManager(ledger)  # audit: no exchange access
+    symbols = {symbol.upper() for symbol in args.pair} if args.pair else None
+    records = manager.realized_history(symbols)
+    payload = render.performance_history_response(records, now_iso())
+    _emit(args, payload, render.performance_history_lines(records) or ['(no fills logged)'])
+    return ExitCode.OK
 
 
 def _cmd_analyze(args: argparse.Namespace) -> ExitCode:

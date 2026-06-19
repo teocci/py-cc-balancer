@@ -7,6 +7,7 @@ from ccbalancer.models.decision import ProposedOrder, RebalanceDecision
 from ccbalancer.models.fill import Fill
 from ccbalancer.models.indicators import IndicatorSnapshot
 from ccbalancer.models.pair_config import PairConfig
+from ccbalancer.models.performance import PerformanceSnapshot
 from ccbalancer.models.result import ExecutionResult
 from ccbalancer.models.state import HistoryEvent, RebalanceState
 
@@ -17,6 +18,7 @@ __all__ = [
     'ProposedOrder',
     'RebalanceDecision',
     'IndicatorSnapshot',
+    'PerformanceSnapshot',
     'RebalanceState',
     'HistoryEvent',
     'ExecutionResult',

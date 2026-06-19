@@ -23,6 +23,7 @@ if TYPE_CHECKING:
         ExecutionResult,
         IndicatorSnapshot,
         PairSnapshot,
+        PerformanceSnapshot,
         ProposedOrder,
         RebalanceDecision,
     )
@@ -32,12 +33,15 @@ __all__ = [
     'decision_to_dict',
     'status_to_dict',
     'indicator_to_dict',
+    'performance_to_dict',
     'result_to_dict',
     'open_order_to_dict',
     'plan_response',
     'status_response',
     'analyze_response',
     'indicator_catalog_response',
+    'performance_response',
+    'performance_history_response',
     'decisions_response',
     'history_response',
     'export_response',
@@ -49,6 +53,8 @@ __all__ = [
     'status_lines',
     'analyze_lines',
     'indicator_catalog_lines',
+    'performance_lines',
+    'performance_history_lines',
     'decisions_lines',
     'history_lines',
     'rebalance_dry_lines',
@@ -167,6 +173,26 @@ def indicator_to_dict(snapshot: IndicatorSnapshot) -> dict[str, object]:
     }
 
 
+def performance_to_dict(snapshot: PerformanceSnapshot) -> dict[str, object]:
+    '''Serialize a :class:`PerformanceSnapshot` with a fixed key order.'''
+    return {
+        'symbol': snapshot.symbol,
+        'position_qty': snapshot.position_qty,
+        'avg_cost': snapshot.avg_cost,
+        'cost_basis': snapshot.cost_basis,
+        'current_price': snapshot.current_price,
+        'market_value': snapshot.market_value,
+        'realized_pnl': snapshot.realized_pnl,
+        'unrealized_pnl': snapshot.unrealized_pnl,
+        'total_pnl': snapshot.total_pnl,
+        'fees_paid': snapshot.fees_paid,
+        'invested': snapshot.invested,
+        'roi_pct': snapshot.roi_pct,
+        'from_baseline': snapshot.from_baseline,
+        'fill_count': snapshot.fill_count,
+    }
+
+
 def plan_response(
     decisions: list[RebalanceDecision],
     meta: dict[str, object],
@@ -200,6 +226,24 @@ def status_response(rows: list[StatusRow], meta: dict[str, object]) -> dict[str,
     return _envelope('status', meta, {'pairs': pairs})
 
 
+def performance_response(
+    snapshots: list[PerformanceSnapshot],
+    totals: dict[str, object],
+    meta: dict[str, object],
+) -> dict[str, object]:
+    '''Build the `performance` JSON envelope: per-pair P&L plus portfolio totals.'''
+    body = {'pairs': [performance_to_dict(s) for s in snapshots], 'portfolio': totals}
+    return _envelope('performance', meta, body)
+
+
+def performance_history_response(
+    records: list[dict[str, object]], generated_at: str
+) -> dict[str, object]:
+    '''Build the `performance --history` JSON envelope (realized P&L, no network).'''
+    body = {'count': len(records), 'pairs': records}
+    return _local_envelope('performance', generated_at, body)
+
+
 def plan_lines(decisions: list[RebalanceDecision]) -> list[str]:
     '''Render `plan` decisions as one text line per pair.'''
     return [_plan_line(decision) for decision in decisions]
@@ -208,6 +252,21 @@ def plan_lines(decisions: list[RebalanceDecision]) -> list[str]:
 def status_lines(rows: list[StatusRow]) -> list[str]:
     '''Render `status` rows as one text line per pair.'''
     return [_status_line(snapshot, decision) for snapshot, decision in rows]
+
+
+def performance_lines(
+    snapshots: list[PerformanceSnapshot], totals: dict[str, object]
+) -> list[str]:
+    '''Render `performance` as one line per pair plus a portfolio total line.'''
+    lines = [_performance_line(snapshot) for snapshot in snapshots]
+    if snapshots:
+        lines.append(_performance_total_line(totals))
+    return lines
+
+
+def performance_history_lines(records: list[dict[str, object]]) -> list[str]:
+    '''Render `performance --history` as one realized-P&L line per symbol.'''
+    return [_performance_history_line(record) for record in records]
 
 
 def indicator_catalog_response(catalog: list[dict[str, object]], generated_at: str) -> dict[str, object]:
@@ -443,6 +502,45 @@ def _status_line(snapshot: PairSnapshot, decision: RebalanceDecision) -> str:
         f'target {decision.target_volatile_pct:.2f}%  drift {decision.drift_pct:+.2f}pp  '
         f'value {decision.total_value:.2f} {_quote(snapshot.symbol)}  last {last}'
     )
+
+
+def _performance_line(snapshot: PerformanceSnapshot) -> str:
+    quote = _quote(snapshot.symbol)
+    tag = ' (baseline)' if snapshot.from_baseline else ''
+    return (
+        f'{snapshot.symbol}  pos {snapshot.position_qty:g}  '
+        f'value {snapshot.market_value:.2f} {quote}  '
+        f'realized {snapshot.realized_pnl:+.2f}  unrealized {snapshot.unrealized_pnl:+.2f}  '
+        f'pnl {snapshot.total_pnl:+.2f}  roi {_roi(snapshot.roi_pct)}{tag}'
+    )
+
+
+def _performance_total_line(totals: dict[str, object]) -> str:
+    return (
+        f'TOTAL  value {_money(totals.get("market_value"))}  '
+        f'realized {_money(totals.get("realized_pnl"), signed=True)}  '
+        f'unrealized {_money(totals.get("unrealized_pnl"), signed=True)}  '
+        f'pnl {_money(totals.get("total_pnl"), signed=True)}  roi {_roi(totals.get("roi_pct"))}'
+    )
+
+
+def _performance_history_line(record: dict[str, object]) -> str:
+    quote = _quote(str(record.get('symbol', '')))
+    return (
+        f'{record.get("symbol")}  realized {_money(record.get("realized_pnl"), signed=True)} {quote}  '
+        f'fees {_money(record.get("fees_paid"))}  pos {record.get("position_qty")}  '
+        f'({record.get("fill_count")} fills)'
+    )
+
+
+def _roi(value: object) -> str:
+    return 'n/a' if not isinstance(value, (int, float)) else f'{value:+.2f}%'
+
+
+def _money(value: object, *, signed: bool = False) -> str:
+    if not isinstance(value, (int, float)):
+        return 'n/a'
+    return f'{value:+.2f}' if signed else f'{value:.2f}'
 
 
 def _format_last(last_at: str | None, days_since: float | None) -> str:
