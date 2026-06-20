@@ -55,8 +55,14 @@ evaluates them deterministically and reports hits (Layer-2 defines, Layer-1 comp
 
 ## Key decisions
 
-- **Exchange:** `ccxt`, default **Bybit** (Binance switchable). Trade-only API keys. Testnet supported.
-- **Account:** single account, per-pair logical partitioning (no sub-accounts).
+- **Exchange:** `ccxt`, default **Bybit** (Binance + OKX switchable; OKX needs a passphrase, handled
+  generically via `requiredCredentials`). Trade-only API keys. Testnet supported.
+- **Account:** single active account; multiple named **auth profiles** (`gh`-style), one active at a
+  time, overridable with `--profile <slug>`. A profile owns its exchange + testnet + credentials.
+  Per-pair logical partitioning within an account (no sub-accounts).
+- **Credentials:** managed by `auth login`; secrets default to the OS **keyring** (metadata-only
+  `auth.json`), with a best-effort `0600` plaintext file fallback (`--no-keyring`/`CCB_AUTH_BACKEND`).
+  Legacy `CCB_API_KEY`/`CCB_API_SECRET` env vars remain a no-profile fallback for CI.
 - **Orders:** limit, with cancel-and-replace ownership via `clientOrderId` prefix (`CCB_PREFIX`).
 - **Scheduling:** agent-driven; no internal timer.
 - **Three concerns:** settings (`config.toml`) vs portfolio (`portfolio.json`, CLI-managed) vs state (`state.json` + `history.jsonl`).
@@ -65,7 +71,8 @@ evaluates them deterministically and reports hits (Layer-2 defines, Layer-1 comp
 
 | Module | Owns |
 |---|---|
-| `config.py` | `AppConfig`; discovery (`--config`→`CCB_CONFIG`→`./ccbalancer.toml`→`~/.ccbalancer/config.toml`); env→TOML→default; secrets env-only |
+| `config.py` | `AppConfig`; discovery (`--config`→`CCB_CONFIG`→`./ccbalancer.toml`→`~/.ccbalancer/config.toml`); creds via active/`--profile` profile then env; precedence flag→profile→env→TOML→default |
+| `stores/auth_store.py` | `auth.json` profiles + active pointer; slug validation; file/keyring secret backends |
 | `constants.py` | Default band/floors, timeouts, exit codes, env keys, `CCB_PREFIX`, file names |
 | `exceptions.py` | `AppError` → `ConfigError`, `ExchangeError`, `InsufficientBalanceError`, `SanityCheckError`, `OrderRejectedError`, `PortfolioError`, `StateError` |
 | `enums/` | `OrderSide`, `SkipReason`, `OutputFormat` |
@@ -95,7 +102,8 @@ New models (frozen+slots): `IndicatorSnapshot`, `PerformanceSnapshot`, `RegimeSi
 |---|---|---|
 | `config.toml` | settings (exchange, testnet, sanity %, limit offset, timeouts, defaults) | human |
 | `indicators.toml` | indicator parameter overrides (registry-validated; own concern, not in `config.toml`) | human + `indicator set` |
-| `.env` | secrets (`CCB_API_KEY`, `CCB_API_SECRET`) | human (never committed, 600) |
+| `auth.json` | auth profiles (metadata + active pointer; secrets inline only on the file backend) | CLI `auth` commands (600) |
+| `.env` | legacy/fallback secrets (`CCB_API_KEY`, `CCB_API_SECRET`) | human (never committed, 600) |
 | `portfolio.json` | pairs + per-pair target/band/notionals + entry & target-set baselines | CLI `pair` commands |
 | `state.json` | last rebalance event per pair | tool (on `rebalance`) |
 | `history.jsonl` | append-only event log | tool (on `rebalance`) |
@@ -121,11 +129,12 @@ Idempotent: re-run cancels its own leftovers and re-places.
 - **read** (live data, no side effects): `status` · `plan` · `analyze <pair> [--timeframe ...]` ·
   `indicator list` · `performance [--pair]` · `regime [--pair]` · `orders` · `version`
 - **write** (mutate state / place orders; dry-run by default, guarded): `rebalance` · `cancel` ·
-  `pair (list/add/set/remove)` · `indicator set` · `flag (add/list/remove)` · `config (show/init)`
+  `pair (list/add/set/remove)` · `indicator set` · `flag (add/list/remove)` · `config (show/init)` ·
+  `auth (login/logout/list/use/status/whoami)`
 - **audit** (local logs only, no network, no side effects): `decisions` · `history` ·
   `performance --history` · `export`
 
-Global flags: `--json`, `--dry-run`, `--pair`, `--exchange`, `--testnet/--no-testnet`, `--config`.
+Global flags: `--json`, `--dry-run`, `--pair`, `--profile`, `--exchange`, `--testnet/--no-testnet`, `--config`.
 
 JSON → stdout (stable key order, enum-string reasons, every response carries `schema_version`); logs →
 stderr. Exit codes: `0` ok/no-op, `2` config/portfolio, `3` exchange/network, `4` order rejected,

@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import sys
+import types
+
 import pytest
 
 from ccbalancer import config as config_mod
 from ccbalancer.constants import (
     ENV_API_KEY,
     ENV_API_SECRET,
+    ENV_AUTH_BACKEND,
     ENV_CONFIG,
     ENV_EXCHANGE,
+    ENV_PROFILE,
     ENV_TESTNET,
 )
 from ccbalancer.enums.side import OrderSide
@@ -22,9 +27,49 @@ def appdir(tmp_path, monkeypatch):
     directory = tmp_path / '.ccbalancer'
     monkeypatch.setattr(config_mod, 'resolve_app_dir', lambda: directory)
     monkeypatch.chdir(tmp_path)
-    for key in (ENV_API_KEY, ENV_API_SECRET, ENV_EXCHANGE, ENV_TESTNET, ENV_CONFIG):
+    for key in (ENV_API_KEY, ENV_API_SECRET, ENV_EXCHANGE, ENV_TESTNET, ENV_CONFIG,
+                ENV_PROFILE, ENV_AUTH_BACKEND):
         monkeypatch.delenv(key, raising=False)
     return directory
+
+
+class FakeKeyring:
+    '''In-memory stand-in for the ``keyring`` module (service/username store).'''
+
+    class errors:  # noqa: N801 - mirrors the real ``keyring.errors`` namespace
+        class KeyringError(Exception):
+            pass
+
+        class PasswordDeleteError(KeyringError):
+            pass
+
+    def __init__(self) -> None:
+        self.store: dict[tuple[str, str], str] = {}
+
+    def set_password(self, service: str, username: str, password: str) -> None:
+        self.store[(service, username)] = password
+
+    def get_password(self, service: str, username: str) -> str | None:
+        return self.store.get((service, username))
+
+    def delete_password(self, service: str, username: str) -> None:
+        try:
+            del self.store[(service, username)]
+        except KeyError as exc:
+            raise self.errors.PasswordDeleteError(username) from exc
+
+
+@pytest.fixture
+def fake_keyring(monkeypatch):
+    '''Install a fake ``keyring`` module so the keyring backend works offline.'''
+    fake = FakeKeyring()
+    module = types.ModuleType('keyring')
+    module.set_password = fake.set_password
+    module.get_password = fake.get_password
+    module.delete_password = fake.delete_password
+    module.errors = FakeKeyring.errors
+    monkeypatch.setitem(sys.modules, 'keyring', module)
+    return fake
 
 
 class FakeExchangeStore:
@@ -72,7 +117,12 @@ class FakeExchangeStore:
         self.markets_loaded += 1
         return self.markets
 
+    def check_credentials(self) -> None:
+        return None
+
     def fetch_balance(self) -> dict[str, object]:
+        if self.offline:
+            raise ExchangeError('offline: cannot fetch balance')
         return self.balance
 
     def fetch_ticker(self, symbol: str) -> dict[str, object]:

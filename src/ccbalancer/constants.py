@@ -14,6 +14,7 @@ __all__ = [
     'APP_DIR_NAME',
     'CONFIG_FILENAME',
     'ENV_FILENAME',
+    'AUTH_FILENAME',
     'PORTFOLIO_FILENAME',
     'STATE_FILENAME',
     'HISTORY_FILENAME',
@@ -29,6 +30,10 @@ __all__ = [
     'ENV_EXCHANGE',
     'ENV_TESTNET',
     'ENV_CONFIG',
+    'ENV_PROFILE',
+    'ENV_AUTH_BACKEND',
+    'AUTH_KEYRING_SERVICE',
+    'DEFAULT_AUTH_BACKEND',
     'DEFAULT_EXCHANGE',
     'DEFAULT_TESTNET',
     'DEFAULT_QUOTE_SANITY_PCT',
@@ -74,6 +79,9 @@ APP_DIR_NAME = '.ccbalancer'
 # File names within the app directory (~/.ccbalancer).
 CONFIG_FILENAME = 'config.toml'
 ENV_FILENAME = '.env'
+# Auth profiles store (gh-style multi-account credentials). Holds profile metadata
+# and the active pointer; secrets live inline (file backend) or in the OS keyring.
+AUTH_FILENAME = 'auth.json'
 PORTFOLIO_FILENAME = 'portfolio.json'
 STATE_FILENAME = 'state.json'
 HISTORY_FILENAME = 'history.jsonl'
@@ -102,6 +110,16 @@ ENV_API_SECRET = 'CCB_API_SECRET'
 ENV_EXCHANGE = 'CCB_EXCHANGE'
 ENV_TESTNET = 'CCB_TESTNET'
 ENV_CONFIG = 'CCB_CONFIG'
+# Selects the active auth profile for one invocation (overridden by --profile).
+ENV_PROFILE = 'CCB_PROFILE'
+# Forces the secret-storage backend: 'keyring' or 'file'.
+ENV_AUTH_BACKEND = 'CCB_AUTH_BACKEND'
+
+# Service name under which credentials are stored in the OS keyring.
+AUTH_KEYRING_SERVICE = 'ccbalancer'
+# Default secret-storage backend; 'keyring' falls back to the 'file' backend when
+# the keyring package or an OS backend is unavailable (e.g. headless CI).
+DEFAULT_AUTH_BACKEND = 'keyring'
 
 # Settings defaults (overridable via TOML, then environment).
 DEFAULT_EXCHANGE = 'bybit'
@@ -126,8 +144,9 @@ DEFAULT_MAX_TRADE_NOTIONAL = 0.0
 # A pair's volatile + stable target must sum to this.
 RATIO_TOTAL_PCT = 100.0
 
-# Exchanges supported via ccxt for this tool.
-SUPPORTED_EXCHANGES = ('bybit', 'binance')
+# Exchanges supported via ccxt for this tool. OKX additionally requires a
+# passphrase credential (handled generically via the exchange's requiredCredentials).
+SUPPORTED_EXCHANGES = ('bybit', 'binance', 'okx')
 
 # Market intelligence (Phase 8). The data exchange supplies OHLCV and may differ
 # from the trading exchange; an empty default means "use the trading exchange".

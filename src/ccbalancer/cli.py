@@ -8,14 +8,18 @@ diagnostics go to stderr via logging.
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import logging
+import os
 import sys
 
 from ccbalancer import __version__
 from ccbalancer import config as config_mod
+from ccbalancer import constants as c
 from ccbalancer.config import Defaults
 from ccbalancer.constants import (
+    AUTH_FILENAME,
     DECISION_LOG_FILENAME,
     HISTORY_FILENAME,
     LEDGER_FILENAME,
@@ -26,6 +30,7 @@ from ccbalancer.constants import (
 )
 from ccbalancer.exceptions import (
     AppError,
+    AuthError,
     ConfigError,
     ExchangeError,
     OrderRejectedError,
@@ -43,9 +48,10 @@ from ccbalancer.managers.indicators_manager import IndicatorsManager
 from ccbalancer.managers.performance_manager import PerformanceManager, portfolio_totals
 from ccbalancer.managers.portfolio_manager import PortfolioManager
 from ccbalancer.managers.rebalance_manager import RebalanceManager
-from ccbalancer.models import ExecutionResult, PairConfig
+from ccbalancer.models import AuthProfile, ExecutionResult, PairConfig
+from ccbalancer.stores.auth_store import AuthStore, backend_for, normalize_profile_name
 from ccbalancer.stores.decision_store import DecisionStore
-from ccbalancer.stores.exchange import ExchangeStore
+from ccbalancer.stores.exchange import ExchangeStore, requires_passphrase
 from ccbalancer.stores.ledger_store import LedgerStore
 from ccbalancer.stores.market_cache import MarketCache
 from ccbalancer.stores.portfolio_store import PortfolioStore, pair_to_dict
@@ -61,6 +67,7 @@ _logger = logging.getLogger(__name__)
 
 _EXIT_BY_ERROR: dict[type[AppError], ExitCode] = {
     ConfigError: ExitCode.CONFIG_ERROR,
+    AuthError: ExitCode.CONFIG_ERROR,
     PortfolioError: ExitCode.CONFIG_ERROR,
     StateError: ExitCode.CONFIG_ERROR,
     ExchangeError: ExitCode.EXCHANGE_ERROR,
@@ -98,6 +105,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_analyze_command(subparsers, common)
     _add_indicator_command(subparsers, common)
     _add_config_command(subparsers, common)
+    _add_auth_command(subparsers, common)
     _add_pair_command(subparsers, common)
     _add_audit_commands(subparsers, common)
     return parser
@@ -163,7 +171,8 @@ def _common_flags() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument('--json', action='store_true', help='Emit compact JSON to stdout.')
     common.add_argument('--config', metavar='PATH', help='Path to a config TOML file.')
-    common.add_argument('--exchange', help='Override the configured exchange (bybit|binance).')
+    common.add_argument('--profile', metavar='NAME', help='Use a named auth profile (overrides the active one).')
+    common.add_argument('--exchange', help='Override the configured/profile exchange (bybit|binance|okx).')
     common.add_argument(
         '--testnet', action=argparse.BooleanOptionalAction, default=None,
         help='Use (or disable) the exchange sandbox.',
@@ -172,6 +181,11 @@ def _common_flags() -> argparse.ArgumentParser:
         '--pair', action='append', metavar='SYMBOL', help='Restrict to a pair (repeatable).'
     )
     return common
+
+
+def _load_config(args: argparse.Namespace) -> config_mod.AppConfig:
+    '''Resolve config, threading the global flags (incl. ``--profile``).'''
+    return config_mod.load_config(args.config, args.exchange, args.testnet, args.profile)
 
 
 def _add_analyze_command(subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
@@ -206,6 +220,41 @@ def _add_config_command(subparsers: argparse._SubParsersAction, common: argparse
     config_sub = config_parser.add_subparsers(dest='config_command', metavar='<action>')
     config_sub.add_parser('show', parents=[common], help='Show resolved settings (secrets masked).')
     config_sub.add_parser('init', parents=[common], help='Scaffold ~/.ccbalancer with templates.')
+
+
+def _add_auth_command(subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
+    auth = subparsers.add_parser('auth', help='Manage exchange credential profiles (gh-style).')
+    sub = auth.add_subparsers(dest='auth_command', metavar='<action>')
+    _add_auth_login(sub, common)
+    logout = sub.add_parser('logout', parents=[common], help='Remove a profile (default: the active one).')
+    logout.add_argument('name', nargs='?', help='Profile to remove.')
+    sub.add_parser('list', parents=[common], help='List profiles (active marked, secrets masked).')
+    use = sub.add_parser('use', parents=[common], help='Switch the active profile.')
+    use.add_argument('name', help='Profile to make active.')
+    sub.add_parser('status', parents=[common], help='Show the active profile and a live credential check.')
+    sub.add_parser('whoami', parents=[common], help='Print the active profile name and exchange (local).')
+
+
+def _add_auth_login(sub: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
+    login = sub.add_parser('login', parents=[common], help='Add or update a credential profile.')
+    # The exchange/sandbox for the new profile reuse the inherited --exchange and
+    # --testnet flags; --testnet defaults to None (BooleanOptionalAction) → testnet.
+    login.add_argument('--name', help='Profile name slug (default: the exchange id).')
+    login.add_argument('--key', help='API key (omit to be prompted when interactive).')
+    login.add_argument('--secret', help='API secret (omit to be prompted when interactive).')
+    login.add_argument('--passphrase', help='Passphrase for venues that require one (e.g. OKX).')
+    login.add_argument(
+        '--keyring', action=argparse.BooleanOptionalAction, default=None,
+        help='Store secrets in the OS keyring (default) or, with --no-keyring, inline in auth.json.',
+    )
+    login.add_argument(
+        '--from-env', action='store_true', dest='from_env',
+        help=f'Import {c.ENV_API_KEY}/{c.ENV_API_SECRET} from the environment.',
+    )
+    login.add_argument(
+        '--no-verify', action='store_true', dest='no_verify',
+        help='Skip the live fetch_balance credential check.',
+    )
 
 
 def _add_pair_command(subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
@@ -250,6 +299,8 @@ def _dispatch(args: argparse.Namespace) -> ExitCode:
         return _cmd_indicator(args)
     if args.command == 'config':
         return _cmd_config(args)
+    if args.command == 'auth':
+        return _cmd_auth(args)
     if args.command == 'pair':
         return _cmd_pair(args)
     if args.command == 'decisions':
@@ -305,7 +356,7 @@ def _record_decisions(store: DecisionStore, decisions: list, meta: dict[str, obj
 
 
 def _cmd_rebalance(args: argparse.Namespace) -> ExitCode:
-    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    config = _load_config(args)
     pairs, portfolio_mgr, rebalance_mgr, exchange, state = _execution_context(config, args.pair)
     meta = _live_meta(config)
     snapshots = portfolio_mgr.snapshots(pairs)
@@ -363,7 +414,7 @@ def _exit_for_results(results: list[ExecutionResult]) -> ExitCode:
 
 
 def _cmd_orders(args: argparse.Namespace) -> ExitCode:
-    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    config = _load_config(args)
     config_mod.require_credentials(config)
     exchange = _exchange_store(config)
     orders = _open_orders(exchange, args.pair)
@@ -373,7 +424,7 @@ def _cmd_orders(args: argparse.Namespace) -> ExitCode:
 
 
 def _cmd_cancel(args: argparse.Namespace) -> ExitCode:
-    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    config = _load_config(args)
     config_mod.require_credentials(config)
     exchange = _exchange_store(config)
     state = StateStore(config.app_dir / STATE_FILENAME, config.app_dir / HISTORY_FILENAME)
@@ -431,7 +482,7 @@ def _cmd_performance(args: argparse.Namespace) -> ExitCode:
 
 
 def _cmd_performance_live(args: argparse.Namespace) -> ExitCode:
-    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    config = _load_config(args)
     portfolio = PortfolioStore(config.app_dir / PORTFOLIO_FILENAME)
     pairs = _selected_pairs(portfolio, args.pair)
     ledger = LedgerStore(config.app_dir / LEDGER_FILENAME)
@@ -444,7 +495,7 @@ def _cmd_performance_live(args: argparse.Namespace) -> ExitCode:
 
 
 def _cmd_performance_history(args: argparse.Namespace) -> ExitCode:
-    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    config = _load_config(args)
     ledger = LedgerStore(config.app_dir / LEDGER_FILENAME)
     manager = PerformanceManager(ledger)  # audit: no exchange access
     symbols = {symbol.upper() for symbol in args.pair} if args.pair else None
@@ -455,7 +506,7 @@ def _cmd_performance_history(args: argparse.Namespace) -> ExitCode:
 
 
 def _cmd_analyze(args: argparse.Namespace) -> ExitCode:
-    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    config = _load_config(args)
     manager = _indicators_manager(config)
     symbol = args.symbol.upper()
     timeframes = args.timeframe or _default_timeframes(config)
@@ -497,7 +548,7 @@ def _cmd_indicator(args: argparse.Namespace) -> ExitCode:
 
 
 def _cmd_indicator_list(args: argparse.Namespace) -> ExitCode:
-    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    config = _load_config(args)
     catalog = registry.describe(config.indicators.values)
     payload = render.indicator_catalog_response(catalog, now_iso())
     _emit(args, payload, render.indicator_catalog_lines(catalog))
@@ -505,7 +556,7 @@ def _cmd_indicator_list(args: argparse.Namespace) -> ExitCode:
 
 
 def _cmd_indicator_set(args: argparse.Namespace) -> ExitCode:
-    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    config = _load_config(args)
     if config.indicators_path is None:
         raise ConfigError('No indicators.toml location resolved')
     overrides = config_mod.read_indicator_overrides(config.indicators_path)
@@ -534,7 +585,7 @@ def _read_context(
     args: argparse.Namespace,
 ) -> tuple[list[PairConfig], PortfolioManager, RebalanceManager, DecisionStore, dict[str, object]]:
     '''Resolve config and stores into the managers a read command needs.'''
-    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    config = _load_config(args)
     portfolio = PortfolioStore(config.app_dir / PORTFOLIO_FILENAME)
     pairs = _selected_pairs(portfolio, args.pair)
     state = StateStore(config.app_dir / STATE_FILENAME, config.app_dir / HISTORY_FILENAME)
@@ -572,7 +623,7 @@ def _cmd_config(args: argparse.Namespace) -> ExitCode:
 
 
 def _cmd_config_show(args: argparse.Namespace) -> ExitCode:
-    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    config = _load_config(args)
     summary = config_mod.masked_summary(config)
     _emit(args, {'command': 'config show', 'config': summary}, _format_summary(summary))
     return ExitCode.OK
@@ -587,6 +638,197 @@ def _cmd_config_init(args: argparse.Namespace) -> ExitCode:
         text.append('  (all files already present)')
     _emit(args, {'command': 'config init', 'app_dir': str(app_dir), 'created': created_str}, text)
     return ExitCode.OK
+
+
+def _cmd_auth(args: argparse.Namespace) -> ExitCode:
+    handlers = {
+        'login': _cmd_auth_login,
+        'logout': _cmd_auth_logout,
+        'list': _cmd_auth_list,
+        'use': _cmd_auth_use,
+        'status': _cmd_auth_status,
+        'whoami': _cmd_auth_whoami,
+    }
+    handler = handlers.get(args.auth_command)
+    if handler is None:
+        usage = 'Usage: auth login|logout|list|use|status|whoami'
+        _emit(args, {'error': 'specify: auth login|logout|list|use|status|whoami'}, [usage])
+        return ExitCode.CONFIG_ERROR
+    return handler(args)
+
+
+def _cmd_auth_login(args: argparse.Namespace) -> ExitCode:
+    exchange = _login_exchange(args)
+    name = normalize_profile_name(args.name or exchange)
+    testnet = c.DEFAULT_TESTNET if args.testnet is None else args.testnet
+    key, secret, password = _collect_credentials(args, exchange)
+    profile = AuthProfile(name, exchange, testnet, key, secret, password)
+    store = _auth_store(args)
+    store.add_or_update(profile)
+    return _verify_and_emit_login(args, store, profile)
+
+
+def _verify_and_emit_login(args: argparse.Namespace, store: AuthStore, profile: AuthProfile) -> ExitCode:
+    active = store.active_name()
+    if args.no_verify:
+        _emit_login(args, profile, active, None)
+        return ExitCode.OK
+    try:
+        _verify_profile(profile)
+    except ExchangeError as exc:
+        _logger.warning('credential check failed: %s', exc)
+        _emit_login(args, profile, active, False)
+        return ExitCode.EXCHANGE_ERROR
+    _emit_login(args, profile, active, True)
+    return ExitCode.OK
+
+
+def _emit_login(
+    args: argparse.Namespace, profile: AuthProfile, active: str | None, verified: bool | None
+) -> None:
+    payload = {
+        'command': 'auth login',
+        'profile': render.masked_profile(profile),
+        'active': active,
+        'verified': verified,
+    }
+    status = {True: 'verified', False: 'saved (credential check failed)', None: 'saved (unverified)'}
+    _emit(args, payload, [f'Logged in {profile.name} ({profile.exchange}): {status[verified]}'])
+
+
+def _cmd_auth_logout(args: argparse.Namespace) -> ExitCode:
+    store = _auth_store(args)
+    name = args.name or store.active_name()
+    if name is None:
+        _emit(args, {'error': 'no profile to remove'}, ['No active profile to remove.'])
+        return ExitCode.CONFIG_ERROR
+    store.remove(name)
+    active = store.active_name()
+    removed = normalize_profile_name(name)
+    _emit(args, {'command': 'auth logout', 'removed': removed, 'active': active},
+          [f'Removed {removed}', f'Active profile: {active or "(none)"}'])
+    return ExitCode.OK
+
+
+def _cmd_auth_list(args: argparse.Namespace) -> ExitCode:
+    store = _auth_store(args)
+    profiles = store.load()
+    active = store.active_name()
+    payload = render.auth_list_response(profiles, active, now_iso())
+    empty = ['(no profiles; run `ccbalancer auth login`)']
+    _emit(args, payload, render.auth_list_lines(profiles, active) or empty)
+    return ExitCode.OK
+
+
+def _cmd_auth_use(args: argparse.Namespace) -> ExitCode:
+    store = _auth_store(args)
+    store.set_active(args.name)
+    active = normalize_profile_name(args.name)
+    _emit(args, {'command': 'auth use', 'active': active}, [f'Active profile: {active}'])
+    return ExitCode.OK
+
+
+def _cmd_auth_status(args: argparse.Namespace) -> ExitCode:
+    store = _auth_store(args)
+    profile = _selected_profile(store, args.profile)
+    if profile is None:
+        _emit(args, {'command': 'auth status', 'active': None},
+              ['No active profile; run `ccbalancer auth login`.'])
+        return ExitCode.OK
+    valid = _probe_profile(profile)
+    active = store.active_name()
+    payload = render.auth_status_response(profile, active, valid, now_iso())
+    _emit(args, payload, render.auth_status_lines(profile, active, valid))
+    return ExitCode.OK
+
+
+def _cmd_auth_whoami(args: argparse.Namespace) -> ExitCode:
+    store = _auth_store(args)
+    profile = _selected_profile(store, args.profile)
+    if profile is None:
+        _emit(args, {'command': 'auth whoami', 'profile': None}, ['No active profile.'])
+        return ExitCode.OK
+    _emit(args, render.auth_whoami_response(profile, now_iso()), render.auth_whoami_lines(profile))
+    return ExitCode.OK
+
+
+def _auth_store(args: argparse.Namespace) -> AuthStore:
+    '''Build the auth store (seam for tests to inject a fake).'''
+    path = config_mod.resolve_app_dir() / AUTH_FILENAME
+    return AuthStore(path, backend_for(path, _backend_pref(args)))
+
+
+def _backend_pref(args: argparse.Namespace) -> str | None:
+    keyring = getattr(args, 'keyring', None)
+    if keyring is None:
+        return None
+    return 'keyring' if keyring else 'file'
+
+
+def _selected_profile(store: AuthStore, profile_flag: str | None) -> AuthProfile | None:
+    name = profile_flag or os.getenv(c.ENV_PROFILE) or store.active_name()
+    if name is None:
+        return None
+    profile = store.get(name)
+    if profile is None:
+        raise AuthError(f'Profile {name!r} not found; run `ccbalancer auth list`')
+    return profile
+
+
+def _login_exchange(args: argparse.Namespace) -> str:
+    exchange = (args.exchange or c.DEFAULT_EXCHANGE).lower()
+    if exchange not in c.SUPPORTED_EXCHANGES:
+        supported = ', '.join(c.SUPPORTED_EXCHANGES)
+        raise AuthError(f'Unsupported exchange {exchange!r}; choose one of: {supported}')
+    return exchange
+
+
+def _collect_credentials(args: argparse.Namespace, exchange: str) -> tuple[str, str, str | None]:
+    '''Resolve (key, secret, passphrase): flags/env, then interactive prompts.'''
+    key = args.key or (os.getenv(c.ENV_API_KEY) if args.from_env else None)
+    secret = args.secret or (os.getenv(c.ENV_API_SECRET) if args.from_env else None)
+    password = args.passphrase
+    if key and secret:
+        return key, secret, password
+    if not sys.stdin.isatty():
+        raise AuthError('Provide --key and --secret (or --from-env) for non-interactive login')
+    key = key or getpass.getpass('API key: ')
+    secret = secret or getpass.getpass('API secret: ')
+    if password is None and requires_passphrase(exchange):
+        password = getpass.getpass('Passphrase: ') or None
+    return key, secret, password
+
+
+def _verify_profile(profile: AuthProfile) -> None:
+    '''Prove the credentials work: local check then a live balance fetch.'''
+    store = _profile_exchange_store(profile)
+    store.check_credentials()
+    store.fetch_balance()
+
+
+def _probe_profile(profile: AuthProfile) -> bool | None:
+    '''Three-state credential probe: True valid, False missing, None unreachable.'''
+    store = _profile_exchange_store(profile)
+    try:
+        store.check_credentials()
+    except ExchangeError:
+        return False
+    try:
+        store.fetch_balance()
+    except ExchangeError:
+        return None
+    return True
+
+
+def _profile_exchange_store(profile: AuthProfile) -> ExchangeStore:
+    '''Build an exchange store for a profile (seam for tests to inject a fake).'''
+    return ExchangeStore(
+        exchange_id=profile.exchange,
+        testnet=profile.testnet,
+        api_key=profile.api_key,
+        api_secret=profile.api_secret,
+        password=profile.password,
+    )
 
 
 def _cmd_pair(args: argparse.Namespace) -> ExitCode:
@@ -639,7 +881,7 @@ def _cmd_pair_remove(args: argparse.Namespace) -> ExitCode:
 
 
 def _cmd_decisions(args: argparse.Namespace) -> ExitCode:
-    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    config = _load_config(args)
     store = DecisionStore(config.app_dir / DECISION_LOG_FILENAME)
     records = _filter_by_pair(store.load(), args.pair)
     payload = render.decisions_response(records, now_iso())
@@ -648,7 +890,7 @@ def _cmd_decisions(args: argparse.Namespace) -> ExitCode:
 
 
 def _cmd_history(args: argparse.Namespace) -> ExitCode:
-    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    config = _load_config(args)
     state = StateStore(config.app_dir / STATE_FILENAME, config.app_dir / HISTORY_FILENAME)
     events = _filter_by_pair(state.load_history(), args.pair)
     payload = render.history_response(events, now_iso())
@@ -657,7 +899,7 @@ def _cmd_history(args: argparse.Namespace) -> ExitCode:
 
 
 def _cmd_export(args: argparse.Namespace) -> ExitCode:
-    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    config = _load_config(args)
     decisions = DecisionStore(config.app_dir / DECISION_LOG_FILENAME).load()
     state = StateStore(config.app_dir / STATE_FILENAME, config.app_dir / HISTORY_FILENAME)
     payload = render.export_response(decisions, state.load_history(), now_iso())
@@ -677,7 +919,7 @@ def _filter_by_pair(
 
 
 def _portfolio_store(args: argparse.Namespace) -> tuple[PortfolioStore, config_mod.AppConfig]:
-    config = config_mod.load_config(args.config, args.exchange, args.testnet)
+    config = _load_config(args)
     return PortfolioStore(config.app_dir / PORTFOLIO_FILENAME), config
 
 

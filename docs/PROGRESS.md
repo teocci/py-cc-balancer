@@ -19,6 +19,7 @@
 | 9 | Decision memory + audit category | done |
 | 10 | Execution + safety guardrails + Binance | done |
 | 11 | Performance & cost-basis (`performance`) | done |
+| Auth | Multi-profile credentials (`gh`-style) + OKX | done |
 | 12 | Regime signal + agent flags/milestones | pending |
 | 13 | Hardening & docs finalize | pending |
 | 14 | Packaging, portable bundle & release CI | pending |
@@ -30,7 +31,17 @@
 
 ## Next action
 
-Implement Phase 12: regime signal + agent flags/milestones. Add `managers/regime_manager.py`
+Implement Phase 12: regime signal + agent flags/milestones.
+
+> Auth (done, inserted before packaging): `gh`-style multi-profile credentials. New `auth` group
+> (`login/logout/list/use/status/whoami`) + global `--profile <slug>`; `stores/auth_store.py`
+> (`AuthStore` over `auth.json`, slug-validated profile names, file + OS-keyring secret backends,
+> `backend_for` honoring the recorded backend). `config.load_config` resolves creds from the
+> active/selected profile (precedence flag→profile→env→TOML→default); a profile owns its
+> exchange/testnet/key/secret/passphrase, legacy `CCB_API_KEY`/`CCB_API_SECRET` retained for CI.
+> OKX added to `SUPPORTED_EXCHANGES` (passphrase via `requiredCredentials`, quirks row). `keyring`
+> default with best-effort `0600` file fallback. Secrets always masked in output. See
+> `docs/phases/phase-auth.md`. Packaging caveat: keyring + PyInstaller for Phase 14. Add `managers/regime_manager.py`
 (price-variance-since-target-set → flag + heuristic-suggested ratio(s) + what-if scenarios), the
 `regime [--pair]` command, `stores/flags_store.py` + `Milestone` model, `managers/flags_manager.py`,
 and the `flag (add/list/remove)` commands. See `docs/phases/phase-12.md`.

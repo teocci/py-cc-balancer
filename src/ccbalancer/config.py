@@ -1,8 +1,10 @@
 '''Application configuration: settings resolution and scaffolding.
 
 Settings come from three layers with this precedence: environment variables →
-TOML config file → built-in defaults. Secrets (API key/secret) are resolved from
-the environment only and are never read from the TOML file.
+TOML config file → built-in defaults. Credentials are resolved from the active
+(or ``--profile``-selected) auth profile when one exists, falling back to the
+``CCB_API_KEY``/``CCB_API_SECRET`` environment for back-compat; a resolved profile
+also supplies its exchange and testnet flag (overridable by an explicit flag).
 
 Discovery order for the config file (first existing wins): an explicit ``--config``
 path, then ``$CCB_CONFIG``, then ``./ccbalancer.toml`` (project-local), then
@@ -20,7 +22,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from ccbalancer import constants as c
-from ccbalancer.exceptions import ConfigError
+from ccbalancer.exceptions import AuthError, ConfigError
+from ccbalancer.models.auth_profile import AuthProfile
+from ccbalancer.stores.auth_store import AuthStore, backend_for
 from ccbalancer.utils import indicator_registry as registry
 
 __all__ = [
@@ -107,14 +111,16 @@ class AppConfig:
         ohlcv_limit: Number of candles fetched per timeframe.
         defaults: Per-pair default values.
         indicators: Resolved indicator parameters and thresholds.
-        api_key: API key from the environment, or ``None``.
-        api_secret: API secret from the environment, or ``None``.
+        api_key: Resolved API key (from the active profile or env), or ``None``.
+        api_secret: Resolved API secret (from the active profile or env), or ``None``.
         app_dir: The resolved ``~/.ccbalancer`` directory.
         config_path: The config file used, or ``None`` if none was found.
         indicators_path: Location of ``indicators.toml`` (read/written by the
             indicator commands), or ``None`` in synthetic configs.
         indicators: Resolved indicator parameters and thresholds.
         safety: Execution safety guardrails.
+        profile: Name of the resolved auth profile, or ``None`` (legacy env path).
+        password: Resolved passphrase for venues that require one (e.g. OKX), else ``None``.
     '''
 
     exchange: str
@@ -135,6 +141,8 @@ class AppConfig:
     config_path: Path | None
     indicators_path: Path | None = None
     indicators: IndicatorSettings = field(default_factory=IndicatorSettings)
+    profile: str | None = None
+    password: str | None = None
 
 
 def resolve_app_dir() -> Path:
@@ -165,19 +173,24 @@ def load_config(
     cli_config: str | None = None,
     exchange_override: str | None = None,
     testnet_override: bool | None = None,
+    profile_override: str | None = None,
+    auth_store: AuthStore | None = None,
 ) -> AppConfig:
-    '''Resolve settings from env, TOML, and defaults.
+    '''Resolve settings from the auth profile, env, TOML, and defaults.
 
     Args:
         cli_config: Explicit config path from ``--config``.
         exchange_override: Exchange id from ``--exchange``.
         testnet_override: Value from ``--testnet/--no-testnet``.
+        profile_override: Profile name from ``--profile``.
+        auth_store: Injected store (tests); built from the app dir when ``None``.
 
     Returns:
         The resolved :class:`AppConfig`.
 
     Raises:
         ConfigError: If the config file is unreadable or the exchange is unsupported.
+        AuthError: If a selected profile name does not exist.
     '''
     app_dir = resolve_app_dir()
     _load_dotenv(app_dir)
@@ -185,10 +198,10 @@ def load_config(
     glob = _read_section(config_path, 'global')
     defaults = _build_defaults(_read_section(config_path, 'defaults'))
     safety = _build_safety(_read_section(config_path, 'safety'), app_dir)
+    profile = _resolve_profile(app_dir, profile_override, auth_store)
 
-    exchange = (exchange_override or os.getenv(c.ENV_EXCHANGE) or glob.get('exchange', c.DEFAULT_EXCHANGE)).lower()
-    _validate_exchange(exchange)
-    testnet = _resolve_testnet(testnet_override, glob)
+    exchange = _resolve_exchange(exchange_override, profile, glob)
+    testnet = _resolve_testnet(testnet_override, glob, profile)
     data_exchange = _resolve_data_exchange(glob, exchange)
     indicators_path = app_dir / c.INDICATORS_FILENAME
 
@@ -205,13 +218,49 @@ def load_config(
         ohlcv_limit=int(glob.get('ohlcv_limit', c.DEFAULT_OHLCV_LIMIT)),
         defaults=defaults,
         safety=safety,
-        api_key=os.getenv(c.ENV_API_KEY),
-        api_secret=os.getenv(c.ENV_API_SECRET),
+        api_key=profile.api_key if profile else os.getenv(c.ENV_API_KEY),
+        api_secret=profile.api_secret if profile else os.getenv(c.ENV_API_SECRET),
         app_dir=app_dir,
         config_path=config_path,
         indicators_path=indicators_path,
         indicators=IndicatorSettings(registry.resolve(read_indicator_overrides(indicators_path))),
+        profile=profile.name if profile else None,
+        password=profile.password if profile else None,
     )
+
+
+def _resolve_profile(
+    app_dir: Path,
+    profile_override: str | None,
+    auth_store: AuthStore | None,
+) -> AuthProfile | None:
+    '''Resolve the active profile: ``--profile`` > ``CCB_PROFILE`` > active pointer.
+
+    Returns ``None`` when no profile is selected (the legacy env credential path).
+
+    Raises:
+        AuthError: If a selected profile name does not exist.
+    '''
+    auth_path = app_dir / c.AUTH_FILENAME
+    store = auth_store or AuthStore(auth_path, backend_for(auth_path))
+    name = profile_override or os.getenv(c.ENV_PROFILE) or store.active_name()
+    if name is None:
+        return None
+    profile = store.get(name)
+    if profile is None:
+        raise AuthError(f'Profile {name!r} not found; run `ccbalancer auth list`')
+    return profile
+
+
+def _resolve_exchange(
+    override: str | None,
+    profile: AuthProfile | None,
+    glob: dict[str, object],
+) -> str:
+    source = override or (profile.exchange if profile else None) or os.getenv(c.ENV_EXCHANGE)
+    exchange = (source or glob.get('exchange', c.DEFAULT_EXCHANGE)).lower()
+    _validate_exchange(exchange)
+    return exchange
 
 
 def require_credentials(config: AppConfig) -> tuple[str, str]:
@@ -222,8 +271,8 @@ def require_credentials(config: AppConfig) -> tuple[str, str]:
     '''
     if not config.api_key or not config.api_secret:
         raise ConfigError(
-            f'Missing API credentials; set {c.ENV_API_KEY} and {c.ENV_API_SECRET} '
-            f'in {config.app_dir / c.ENV_FILENAME}'
+            'Missing API credentials; add a profile with `ccbalancer auth login` or set '
+            f'{c.ENV_API_KEY} and {c.ENV_API_SECRET} in {config.app_dir / c.ENV_FILENAME}'
         )
     return config.api_key, config.api_secret
 
@@ -252,8 +301,10 @@ def masked_summary(config: AppConfig) -> dict[str, object]:
             'max_session_notional_usd': config.safety.max_session_notional_usd,
             'kill_switch_path': str(config.safety.kill_switch_path),
         },
+        'profile': config.profile,
         'api_key': _mask(config.api_key),
         'api_secret': _mask(config.api_secret),
+        'password': _mask(config.password),
         'app_dir': str(config.app_dir),
         'config_path': str(config.config_path) if config.config_path else None,
     }
@@ -371,9 +422,17 @@ def _toml_value(value: object) -> str:
     return repr(value) if isinstance(value, float) else str(value)
 
 
-def _resolve_testnet(override: bool | None, glob: dict[str, object]) -> bool:
+def _resolve_testnet(
+    override: bool | None,
+    glob: dict[str, object],
+    profile: AuthProfile | None = None,
+) -> bool:
+    # Precedence: explicit flag > profile > env > TOML > default. A profile owns
+    # its account, so it outranks a stray CCB_TESTNET in the shell.
     if override is not None:
         return override
+    if profile is not None:
+        return profile.testnet
     env_value = os.getenv(c.ENV_TESTNET)
     if env_value is not None:
         return _parse_bool(env_value)
@@ -488,9 +547,12 @@ ratios = [0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0]
 '''
 
 ENV_TEMPLATE = '''# Secrets for ccbalancer. Never commit this file.
+# Preferred: manage credentials with `ccbalancer auth login` (multi-account,
+# OS-keyring storage). These env vars remain a single-account fallback for CI.
 CCB_API_KEY=
 CCB_API_SECRET=
 # Optional non-secret overrides:
 # CCB_EXCHANGE=bybit
 # CCB_TESTNET=true
+# CCB_PROFILE=bybit-main   # select an auth profile by name
 '''

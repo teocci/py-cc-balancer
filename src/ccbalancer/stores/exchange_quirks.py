@@ -45,6 +45,9 @@ class ExchangeQuirks:
 _QUIRKS: dict[str, ExchangeQuirks] = {
     'bybit': ExchangeQuirks('bybit', 'clientOrderId', True, 36),
     'binance': ExchangeQuirks('binance', 'clientOrderId', True, 36),
+    # OKX maps the unified clientOrderId to its native clOrdId, which accepts
+    # alphanumerics up to 32 chars; cancel requires the symbol like the others.
+    'okx': ExchangeQuirks('okx', 'clientOrderId', True, 32),
 }
 
 

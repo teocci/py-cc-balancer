@@ -85,6 +85,23 @@ All notable changes to this project are documented here. Format follows
   - New CLI: `rebalance` (write, guarded), `orders` (read, flags our open orders), `cancel`
     (write, dry-run by default, kill-switch-exempt). Exit codes: `OK`/`PARTIAL_FAILURE`/
     `ORDER_REJECTED` from execution results, `SAFETY_BLOCKED` from a tripped guardrail.
+- Auth: multi-profile credentials (`gh`-style) — a new `auth` command group
+  (`login`/`logout`/`list`/`use`/`status`/`whoami`) and a global `--profile <slug>` flag manage
+  multiple named exchange-account profiles, one active at a time. `stores/auth_store.py` owns
+  `auth.json` (profiles + active pointer, atomic write, best-effort `0600`) with slug-validated
+  profile names and two pluggable secret backends behind a `SecretBackend` protocol: the OS
+  **keyring** (default — metadata-only `auth.json`, secrets in Credential Manager/Keychain/Secret
+  Service) and a `0600` **file** backend (secrets inline); `backend_for` honors the backend recorded
+  in an existing file so reads match writes, and `make_secret_backend` falls back to file when no
+  keyring is available. Credential resolution is centralized in `config.load_config` with precedence
+  flag → active/selected profile → env → TOML → default; a profile owns its exchange + testnet +
+  key/secret/passphrase, while legacy `CCB_API_KEY`/`CCB_API_SECRET` remain a no-profile fallback for
+  CI. `login` verifies credentials via `check_required_credentials()` + a live `fetch_balance()`
+  (opt out with `--no-verify`; save-then-warn on failure); `status` does a three-state live probe
+  (`valid: true/false/null`) and degrades gracefully offline. Secrets are always masked in output
+  (text and `--json`). **OKX** added to `SUPPORTED_EXCHANGES` with a quirks row and passphrase support
+  (plumbed through `ExchangeStore` and prompted generically via `requiredCredentials`); new `AuthError`
+  and the `keyring` dependency.
 - Phase 11: performance & cost-basis — `managers/performance_manager.py` walks the append-only
   `ledger.jsonl` with the **average-cost** method (all money math via `Decimal`, exact to the cent) and
   marks the held position to market with live tickers, computing realized P&L per sell, unrealized P&L

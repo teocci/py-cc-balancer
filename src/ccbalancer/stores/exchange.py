@@ -28,7 +28,7 @@ from ccbalancer.stores.exchange_quirks import ExchangeQuirks, quirks_for
 if TYPE_CHECKING:
     from ccbalancer.config import AppConfig
 
-__all__ = ['ExchangeStore']
+__all__ = ['ExchangeStore', 'requires_passphrase']
 
 # ccxt order type: this tool only ever places limit orders (see DESIGN.md).
 _LIMIT_ORDER_TYPE = 'limit'
@@ -44,6 +44,7 @@ class ExchangeStore:
         timeout_ms: HTTP timeout passed to ccxt, in milliseconds.
         api_key: API key, or ``None`` for public-only access.
         api_secret: API secret, or ``None`` for public-only access.
+        password: Passphrase for venues that require one (e.g. OKX), else ``None``.
     '''
 
     exchange_id: str
@@ -51,6 +52,7 @@ class ExchangeStore:
     timeout_ms: int = c.DEFAULT_HTTP_TIMEOUT_MS
     api_key: str | None = None
     api_secret: str | None = None
+    password: str | None = None
     _client: object | None = field(default=None, repr=False, compare=False)
 
     @classmethod
@@ -62,7 +64,17 @@ class ExchangeStore:
             timeout_ms=config.http_timeout_ms,
             api_key=config.api_key,
             api_secret=config.api_secret,
+            password=config.password,
         )
+
+    def check_credentials(self) -> None:
+        '''Verify required credentials are present (local check, no network).
+
+        Raises:
+            ExchangeError: If a required credential is missing or empty.
+        '''
+        with _translate('check credentials'):
+            self.client.check_required_credentials()
 
     @property
     def client(self) -> object:
@@ -140,6 +152,8 @@ class ExchangeStore:
             {
                 'apiKey': self.api_key or '',
                 'secret': self.api_secret or '',
+                # Passphrase for venues that require one (e.g. OKX); harmless elsewhere.
+                'password': self.password or '',
                 'timeout': self.timeout_ms,
                 'enableRateLimit': True,
                 # Sync the signed-request timestamp to the exchange clock so a
@@ -151,6 +165,18 @@ class ExchangeStore:
         )
         client.set_sandbox_mode(self.testnet)
         return client
+
+
+def requires_passphrase(exchange_id: str) -> bool:
+    '''Return whether the exchange requires a passphrase credential (e.g. OKX).
+
+    Reads ccxt's ``requiredCredentials`` map; instantiating the class is local
+    (no network). Unknown ids return ``False``.
+    '''
+    exchange_cls = getattr(ccxt, exchange_id, None)
+    if exchange_cls is None:
+        return False
+    return bool(exchange_cls().requiredCredentials.get('password'))
 
 
 @contextmanager

@@ -10,6 +10,7 @@ from __future__ import annotations
 __all__ = [
     'AppError',
     'ConfigError',
+    'AuthError',
     'PortfolioError',
     'StateError',
     'ExchangeError',
@@ -26,6 +27,14 @@ class AppError(Exception):
 
 class ConfigError(AppError):
     '''Invalid, missing, or unreadable configuration or secrets.'''
+
+
+class AuthError(AppError):
+    '''Invalid, missing, or unresolvable auth profile or credential operation.
+
+    Raised for an unknown/selected profile that does not exist, a malformed
+    profile name (must be a slug), or a failed credential-store operation.
+    '''
 
 
 class PortfolioError(AppError):

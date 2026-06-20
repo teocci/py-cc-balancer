@@ -58,7 +58,15 @@
       "PowerShell(\"== commits containing the trailer ==\")",
       "PowerShell(\"== upstream / remotes ==\")",
       "Bash(echo \"exit code: $?\")",
-      "Bash(.venv/Scripts/python -)"
+      "Bash(.venv/Scripts/python -)",
+      "Bash(git -C . log --oneline -3)",
+      "Bash(git -C . reset -q .claude/settings.json)",
+      "Bash(git -C . add CHANGELOG.md docs/DESIGN.md docs/IMPROVEMENTS.md docs/PROGRESS.md docs/phases/phase-auth.md pyproject.toml src/ccbalancer tests/)",
+      "Bash(git -C . commit -q -F -)",
+      "Bash(git -C . log --oneline -1)",
+      "Bash(git -C . add .claude/settings.json)",
+      "Bash(git -C . commit -q --amend --no-edit)",
+      "Bash(git -C . show --stat --oneline HEAD)"
     ],
     "additionalDirectories": [
       "d:\\teocci\\code\\python\\py-cc-balanacer\\.claude\\skills",
