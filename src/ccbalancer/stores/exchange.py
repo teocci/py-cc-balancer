@@ -142,6 +142,11 @@ class ExchangeStore:
                 'secret': self.api_secret or '',
                 'timeout': self.timeout_ms,
                 'enableRateLimit': True,
+                # Sync the signed-request timestamp to the exchange clock so a
+                # drifting local clock does not trip the exchange's recv_window
+                # (ccxt loads the offset during load_markets, which every unified
+                # private call invokes). See docs/cctx/02-exchanges.md.
+                'options': {'adjustForTimeDifference': True},
             }
         )
         client.set_sandbox_mode(self.testnet)

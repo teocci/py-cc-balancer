@@ -56,7 +56,9 @@
       "PowerShell(.venv/Scripts/python -m ccbalancer plan --help 2>&1)",
       "PowerShell(.venv/Scripts/python -m pytest tests/ -p no:cacheprovider 2>&1)",
       "PowerShell(\"== commits containing the trailer ==\")",
-      "PowerShell(\"== upstream / remotes ==\")"
+      "PowerShell(\"== upstream / remotes ==\")",
+      "Bash(echo \"exit code: $?\")",
+      "Bash(.venv/Scripts/python -)"
     ],
     "additionalDirectories": [
       "d:\\teocci\\code\\python\\py-cc-balanacer\\.claude\\skills",

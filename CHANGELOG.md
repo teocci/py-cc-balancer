@@ -99,3 +99,10 @@ All notable changes to this project are documented here. Format follows
     `schema_version` envelope) and `performance --history` (audit — replays realized P&L per symbol
     from the ledger only, with the per-fill trade timeline; zero network). Top-level `--help` taxonomy
     updated. Network-freeness of `--history` enforced in tests via the raising `_exchange_store` seam.
+
+### Fixed
+- F-1: authenticated exchange calls no longer fail with Bybit `retCode 10002` (server-timestamp /
+  `recv_window`) when the local clock drifts. `ExchangeStore` now builds the ccxt client with
+  `options.adjustForTimeDifference = True`, so ccxt syncs to the exchange clock during `load_markets`
+  (invoked by every unified private call) — `status`/`orders`/`cancel`/`performance`/`rebalance` work
+  regardless of local clock skew. The canonical ccxt remedy (see `docs/cctx/02-exchanges.md`).

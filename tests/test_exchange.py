@@ -159,6 +159,7 @@ def test_build_client_applies_sandbox_and_options(monkeypatch):
     assert captured['options']['apiKey'] == 'k'
     assert captured['options']['secret'] == 's'
     assert captured['options']['enableRateLimit'] is True
+    assert captured['options']['options']['adjustForTimeDifference'] is True
 
 
 def test_from_config_maps_fields():
