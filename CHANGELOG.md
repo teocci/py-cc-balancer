@@ -116,6 +116,23 @@ All notable changes to this project are documented here. Format follows
     `schema_version` envelope) and `performance --history` (audit — replays realized P&L per symbol
     from the ledger only, with the per-fill trade timeline; zero network). Top-level `--help` taxonomy
     updated. Network-freeness of `--history` enforced in tests via the raising `_exchange_store` seam.
+- Phase 12: regime signal + agent flags/milestones — DESIGN.md signal #3 and agent-defined
+  watch-conditions (Layer-2 defines, Layer-1 computes).
+  - **Regime** (`managers/regime_manager.py`, frozen+slots `models/RegimeSignal` + `RegimeScenario`):
+    compares price now vs `target_set_price` and, once the move exceeds `target_review_band_pct`
+    (default 20%, new `[global]` key), raises a flag, a deterministic suggested ratio, and what-if
+    scenarios (value/risk under each candidate ratio). Suggestion and scenarios share one mechanism — a
+    fixed volatile-share ladder (`REGIME_SCENARIO_VOLATILE_PCTS` = 80/50/25, with the pair's current
+    target always injected as a rung); a run-up steps one rung toward less risk, a drop toward more, a
+    move within the band holds. Pure (same inputs → same signal); never auto-changes the ratio. New
+    read command `regime [--pair]` (live, stable `schema_version` envelope).
+  - **Flags/milestones** (`stores/flags_store.py` over `flags.json`, `managers/flags_manager.py`,
+    frozen+slots `models/Milestone`): register watch-conditions (`<symbol> <metric> <op> <threshold>`
+    over `price`/`drift_pct`/`volatile_pct`/`value`; word-form operators `ge|le|gt|lt|eq` avoid shell
+    quoting) and evaluate them against live per-pair snapshots, reporting `hit`/`miss`/`unknown`. New
+    write commands `flag add|list|remove` — `add`/`remove` are local writes; `list` evaluates live and
+    only fetches the milestone symbols that are configured pairs. New `FlagError` (exit 2). `--help`
+    taxonomy updated to include `regime` (read) and `flag` (write).
 
 ### Fixed
 - F-1: authenticated exchange calls no longer fail with Bybit `retCode 10002` (server-timestamp /

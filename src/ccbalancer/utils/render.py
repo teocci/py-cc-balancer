@@ -23,10 +23,13 @@ if TYPE_CHECKING:
         AuthProfile,
         ExecutionResult,
         IndicatorSnapshot,
+        Milestone,
         PairSnapshot,
         PerformanceSnapshot,
         ProposedOrder,
         RebalanceDecision,
+        RegimeScenario,
+        RegimeSignal,
     )
 
 __all__ = [
@@ -35,6 +38,8 @@ __all__ = [
     'status_to_dict',
     'indicator_to_dict',
     'performance_to_dict',
+    'regime_to_dict',
+    'milestone_to_dict',
     'result_to_dict',
     'open_order_to_dict',
     'plan_response',
@@ -43,6 +48,8 @@ __all__ = [
     'indicator_catalog_response',
     'performance_response',
     'performance_history_response',
+    'regime_response',
+    'flags_response',
     'decisions_response',
     'history_response',
     'export_response',
@@ -63,6 +70,8 @@ __all__ = [
     'indicator_catalog_lines',
     'performance_lines',
     'performance_history_lines',
+    'regime_lines',
+    'flags_lines',
     'decisions_lines',
     'history_lines',
     'rebalance_dry_lines',
@@ -201,6 +210,56 @@ def performance_to_dict(snapshot: PerformanceSnapshot) -> dict[str, object]:
     }
 
 
+def regime_to_dict(signal: RegimeSignal) -> dict[str, object]:
+    '''Serialize a :class:`RegimeSignal` with a fixed key order.'''
+    suggested = _ratio(signal.suggested_volatile_pct, signal.suggested_stable_pct)
+    return {
+        'symbol': signal.symbol,
+        'flag': signal.flag,
+        'direction': signal.direction,
+        'target_set_price': signal.target_set_price,
+        'target_set_ts': signal.target_set_ts,
+        'current_price': signal.current_price,
+        'price_change_pct': signal.price_change_pct,
+        'review_band_pct': signal.review_band_pct,
+        'total_value': signal.total_value,
+        'current_ratio': _ratio(signal.current_volatile_pct, signal.current_stable_pct),
+        'suggested_ratio': suggested,
+        'scenarios': [_scenario_to_dict(scenario) for scenario in signal.scenarios],
+    }
+
+
+def _scenario_to_dict(scenario: RegimeScenario) -> dict[str, object]:
+    return {
+        'volatile_pct': scenario.volatile_pct,
+        'stable_pct': scenario.stable_pct,
+        'volatile_value': scenario.volatile_value,
+        'stable_value': scenario.stable_value,
+        'is_current': scenario.is_current,
+        'is_suggested': scenario.is_suggested,
+    }
+
+
+def _ratio(volatile_pct: float | None, stable_pct: float | None) -> dict[str, object] | None:
+    if volatile_pct is None or stable_pct is None:
+        return None
+    return {'volatile_pct': volatile_pct, 'stable_pct': stable_pct}
+
+
+def milestone_to_dict(milestone: Milestone) -> dict[str, object]:
+    '''Serialize a :class:`Milestone` with a fixed key order.'''
+    return {
+        'id': milestone.id,
+        'symbol': milestone.symbol,
+        'metric': milestone.metric,
+        'op': milestone.op,
+        'threshold': milestone.threshold,
+        'expression': milestone.expression,
+        'note': milestone.note,
+        'created_at': milestone.created_at,
+    }
+
+
 def plan_response(
     decisions: list[RebalanceDecision],
     meta: dict[str, object],
@@ -252,6 +311,20 @@ def performance_history_response(
     return _local_envelope('performance', generated_at, body)
 
 
+def regime_response(
+    signals: list[RegimeSignal], meta: dict[str, object]
+) -> dict[str, object]:
+    '''Build the `regime` JSON envelope: one signal per pair (live).'''
+    return _envelope('regime', meta, {'pairs': [regime_to_dict(s) for s in signals]})
+
+
+def flags_response(
+    results: list[dict[str, object]], meta: dict[str, object]
+) -> dict[str, object]:
+    '''Build the `flag list` JSON envelope: milestones with their live verdicts.'''
+    return _envelope('flag list', meta, {'count': len(results), 'flags': results})
+
+
 def plan_lines(decisions: list[RebalanceDecision]) -> list[str]:
     '''Render `plan` decisions as one text line per pair.'''
     return [_plan_line(decision) for decision in decisions]
@@ -275,6 +348,16 @@ def performance_lines(
 def performance_history_lines(records: list[dict[str, object]]) -> list[str]:
     '''Render `performance --history` as one realized-P&L line per symbol.'''
     return [_performance_history_line(record) for record in records]
+
+
+def regime_lines(signals: list[RegimeSignal]) -> list[str]:
+    '''Render `regime` as one line per pair.'''
+    return [_regime_line(signal) for signal in signals]
+
+
+def flags_lines(results: list[dict[str, object]]) -> list[str]:
+    '''Render `flag list` as one line per milestone with its verdict.'''
+    return [_flag_result_line(result) for result in results]
 
 
 def indicator_catalog_response(catalog: list[dict[str, object]], generated_at: str) -> dict[str, object]:
@@ -613,6 +696,34 @@ def _performance_history_line(record: dict[str, object]) -> str:
         f'{record.get("symbol")}  realized {_money(record.get("realized_pnl"), signed=True)} {quote}  '
         f'fees {_money(record.get("fees_paid"))}  pos {record.get("position_qty")}  '
         f'({record.get("fill_count")} fills)'
+    )
+
+
+def _regime_line(signal: RegimeSignal) -> str:
+    quote = _quote(signal.symbol)
+    current = f'{signal.current_volatile_pct:g}/{signal.current_stable_pct:g}'
+    if signal.price_change_pct is None:
+        return f'{signal.symbol}  no target-set baseline (set with `pair set --target-set-price`)  (current {current})'
+    flag = 'REVIEW' if signal.flag else 'hold'
+    suggest = (
+        f'{signal.suggested_volatile_pct:g}/{signal.suggested_stable_pct:g}'
+        if signal.suggested_volatile_pct is not None else 'n/a'
+    )
+    return (
+        f'{signal.symbol}  price {signal.current_price:g} vs target-set {signal.target_set_price:g} {quote}  '
+        f'change {signal.price_change_pct:+.2f}%  [{flag}]  suggest {suggest}  (current {current})'
+    )
+
+
+def _flag_result_line(result: dict[str, object]) -> str:
+    status = str(result.get('status', '')).upper()
+    current = result.get('current_value')
+    current_str = f'{current:g}' if isinstance(current, (int, float)) else 'n/a'
+    note = result.get('note')
+    note_str = f'  — {note}' if note else ''
+    return (
+        f'#{result.get("id")}  {result.get("symbol")}  {result.get("expression")}  '
+        f'current {current_str}  {status}{note_str}'
     )
 
 

@@ -170,6 +170,7 @@ def test_from_config_maps_fields():
         limit_offset_pct=0.0,
         min_interval_hours=0,
         http_timeout_ms=8000,
+        target_review_band_pct=20.0,
         data_exchange='binance',
         decision_timeframes=('1m', '5m', '15m'),
         analysis_timeframes=('1h', '4h', '1d', '1w'),

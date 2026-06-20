@@ -1,7 +1,7 @@
 # PROGRESS
 
 **Current version:** 0.1.0 (unreleased)
-**Active phase:** Phase 12 — Regime signal + agent flags/milestones
+**Active phase:** Phase 13 — Hardening & docs finalize
 
 ## Phase status
 
@@ -20,7 +20,7 @@
 | 10 | Execution + safety guardrails + Binance | done |
 | 11 | Performance & cost-basis (`performance`) | done |
 | Auth | Multi-profile credentials (`gh`-style) + OKX | done |
-| 12 | Regime signal + agent flags/milestones | pending |
+| 12 | Regime signal + agent flags/milestones | done |
 | 13 | Hardening & docs finalize | pending |
 | 14 | Packaging, portable bundle & release CI | pending |
 
@@ -31,7 +31,21 @@
 
 ## Next action
 
-Implement Phase 12: regime signal + agent flags/milestones.
+Implement Phase 13: hardening & docs finalize.
+
+> Phase 12 (done): regime signal (DESIGN.md #3) + agent flags/milestones — Layer-2 defines, Layer-1
+> computes. `managers/regime_manager.py` compares price now vs `target_set_price` and, once the move
+> exceeds `target_review_band_pct` (default 20%, new `[global]` key), raises a flag + a deterministic
+> suggested ratio + what-if scenarios (value/risk under each candidate). Suggestion and scenarios share
+> one mechanism — a fixed volatile-share ladder (`REGIME_SCENARIO_VOLATILE_PCTS` 80/50/25 with the
+> pair's current target always injected as a rung); a run-up steps one rung toward less risk, a drop
+> toward more, within-band holds. Pure; never auto-changes the ratio. `models/RegimeSignal` +
+> `RegimeScenario` (frozen+slots). New read command `regime [--pair]`. `stores/flags_store.py` over
+> `flags.json` + `managers/flags_manager.py` + `models/Milestone` register and evaluate watch-conditions
+> (`<symbol> <metric> <op> <threshold>` over `price`/`drift_pct`/`volatile_pct`/`value`; word-form ops
+> `ge|le|gt|lt|eq`) against live snapshots, reporting hit/miss/unknown. New write commands
+> `flag add|list|remove` (`add`/`remove` local; `list` live, fetching only configured milestone pairs).
+> New `FlagError` (exit 2). See `docs/phases/phase-12.md`.
 
 > Auth (done, inserted before packaging): `gh`-style multi-profile credentials. New `auth` group
 > (`login/logout/list/use/status/whoami`) + global `--profile <slug>`; `stores/auth_store.py`
@@ -41,10 +55,7 @@ Implement Phase 12: regime signal + agent flags/milestones.
 > exchange/testnet/key/secret/passphrase, legacy `CCB_API_KEY`/`CCB_API_SECRET` retained for CI.
 > OKX added to `SUPPORTED_EXCHANGES` (passphrase via `requiredCredentials`, quirks row). `keyring`
 > default with best-effort `0600` file fallback. Secrets always masked in output. See
-> `docs/phases/phase-auth.md`. Packaging caveat: keyring + PyInstaller for Phase 14. Add `managers/regime_manager.py`
-(price-variance-since-target-set → flag + heuristic-suggested ratio(s) + what-if scenarios), the
-`regime [--pair]` command, `stores/flags_store.py` + `Milestone` model, `managers/flags_manager.py`,
-and the `flag (add/list/remove)` commands. See `docs/phases/phase-12.md`.
+> `docs/phases/phase-auth.md`. Packaging caveat: keyring + PyInstaller for Phase 14.
 
 > Phase 11 (done): `managers/performance_manager.py` walks the append-only `ledger.jsonl` with the
 > average-cost method (Decimal math) and marks the held position to market via live tickers, computing

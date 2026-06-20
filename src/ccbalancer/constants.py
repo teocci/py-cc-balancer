@@ -20,6 +20,7 @@ __all__ = [
     'HISTORY_FILENAME',
     'DECISION_LOG_FILENAME',
     'LEDGER_FILENAME',
+    'FLAGS_FILENAME',
     'INDICATORS_FILENAME',
     'OHLCV_DIRNAME',
     'KILL_SWITCH_FILENAME',
@@ -47,6 +48,10 @@ __all__ = [
     'DEFAULT_BAND_PCT',
     'DEFAULT_MIN_NOTIONAL',
     'DEFAULT_MAX_TRADE_NOTIONAL',
+    'DEFAULT_TARGET_REVIEW_BAND_PCT',
+    'REGIME_SCENARIO_VOLATILE_PCTS',
+    'MILESTONE_METRICS',
+    'MILESTONE_OPS',
     'RATIO_TOTAL_PCT',
     'SUPPORTED_EXCHANGES',
     'DEFAULT_DATA_EXCHANGE',
@@ -90,6 +95,8 @@ HISTORY_FILENAME = 'history.jsonl'
 DECISION_LOG_FILENAME = 'decision_log.jsonl'
 # Append-only log of executed fills (price, qty, fee, side); the cost-basis source.
 LEDGER_FILENAME = 'ledger.jsonl'
+# Agent/user milestones and watch-conditions, managed by the `flag` commands.
+FLAGS_FILENAME = 'flags.json'
 # Indicator parameter overrides, kept out of config.toml (own concern, safely
 # machine-rewritable by `indicator set`).
 INDICATORS_FILENAME = 'indicators.toml'
@@ -143,6 +150,22 @@ DEFAULT_MAX_TRADE_NOTIONAL = 0.0
 
 # A pair's volatile + stable target must sum to this.
 RATIO_TOTAL_PCT = 100.0
+
+# Regime / price-variance-since-target-set (DESIGN.md signal #3). The CLI flags
+# the target ratio for review once price has moved more than this percent since
+# the ratio was set (`pair set --target-set-price`). Wider than the allocation
+# band: a trade-trigger is routine; a strategy review is not.
+DEFAULT_TARGET_REVIEW_BAND_PCT = 20.0
+# Fixed ladder of candidate volatile shares used for the regime what-if scenarios
+# and the deterministic suggested-ratio step (the pair's current target is always
+# added as a rung). Descending = most to least at-risk.
+REGIME_SCENARIO_VOLATILE_PCTS = (80.0, 50.0, 25.0)
+
+# Milestone watch-conditions (agent-defined flags). Metrics are read from the live
+# per-pair snapshot/decision; operators use word forms to avoid shell quoting of
+# `<`/`>`. Each maps to its human comparison symbol.
+MILESTONE_METRICS = ('price', 'drift_pct', 'volatile_pct', 'value')
+MILESTONE_OPS = {'ge': '>=', 'le': '<=', 'gt': '>', 'lt': '<', 'eq': '=='}
 
 # Exchanges supported via ccxt for this tool. OKX additionally requires a
 # passphrase credential (handled generically via the exchange's requiredCredentials).

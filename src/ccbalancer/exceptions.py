@@ -12,6 +12,7 @@ __all__ = [
     'ConfigError',
     'AuthError',
     'PortfolioError',
+    'FlagError',
     'StateError',
     'ExchangeError',
     'InsufficientBalanceError',
@@ -39,6 +40,14 @@ class AuthError(AppError):
 
 class PortfolioError(AppError):
     '''Invalid portfolio data or a rejected pair mutation.'''
+
+
+class FlagError(AppError):
+    '''Invalid milestone definition or a rejected flag mutation.
+
+    Raised for a malformed milestone (bad symbol, unknown metric/operator) or a
+    `flag remove` referencing an id that does not exist.
+    '''
 
 
 class StateError(AppError):

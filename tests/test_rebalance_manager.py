@@ -258,6 +258,7 @@ def test_from_config_copies_relevant_settings():
         limit_offset_pct=0.5,
         min_interval_hours=8,
         http_timeout_ms=10000,
+        target_review_band_pct=20.0,
         data_exchange='bybit',
         decision_timeframes=('1m', '5m', '15m'),
         analysis_timeframes=('1h', '4h', '1d', '1w'),

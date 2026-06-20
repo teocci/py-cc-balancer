@@ -21,8 +21,11 @@ from ccbalancer.config import Defaults
 from ccbalancer.constants import (
     AUTH_FILENAME,
     DECISION_LOG_FILENAME,
+    FLAGS_FILENAME,
     HISTORY_FILENAME,
     LEDGER_FILENAME,
+    MILESTONE_METRICS,
+    MILESTONE_OPS,
     OHLCV_DIRNAME,
     PORTFOLIO_FILENAME,
     STATE_FILENAME,
@@ -33,6 +36,7 @@ from ccbalancer.exceptions import (
     AuthError,
     ConfigError,
     ExchangeError,
+    FlagError,
     OrderRejectedError,
     PortfolioError,
     SafetyError,
@@ -44,14 +48,17 @@ from ccbalancer.managers.execution_manager import (
     kill_switch_active,
     session_notional,
 )
+from ccbalancer.managers.flags_manager import FlagsManager
 from ccbalancer.managers.indicators_manager import IndicatorsManager
 from ccbalancer.managers.performance_manager import PerformanceManager, portfolio_totals
 from ccbalancer.managers.portfolio_manager import PortfolioManager
 from ccbalancer.managers.rebalance_manager import RebalanceManager
+from ccbalancer.managers.regime_manager import RegimeManager
 from ccbalancer.models import AuthProfile, ExecutionResult, PairConfig
 from ccbalancer.stores.auth_store import AuthStore, backend_for, normalize_profile_name
 from ccbalancer.stores.decision_store import DecisionStore
 from ccbalancer.stores.exchange import ExchangeStore, requires_passphrase
+from ccbalancer.stores.flags_store import FlagsStore
 from ccbalancer.stores.ledger_store import LedgerStore
 from ccbalancer.stores.market_cache import MarketCache
 from ccbalancer.stores.portfolio_store import PortfolioStore, pair_to_dict
@@ -69,6 +76,7 @@ _EXIT_BY_ERROR: dict[type[AppError], ExitCode] = {
     ConfigError: ExitCode.CONFIG_ERROR,
     AuthError: ExitCode.CONFIG_ERROR,
     PortfolioError: ExitCode.CONFIG_ERROR,
+    FlagError: ExitCode.CONFIG_ERROR,
     StateError: ExitCode.CONFIG_ERROR,
     ExchangeError: ExitCode.EXCHANGE_ERROR,
     OrderRejectedError: ExitCode.ORDER_REJECTED,
@@ -80,8 +88,8 @@ _EXIT_BY_ERROR: dict[type[AppError], ExitCode] = {
 # (live data, no writes) from write (mutates/places orders) from audit (local
 # logs only, no network).
 _COMMAND_TAXONOMY = '''command categories:
-  read   (live data, no side effects):  status, plan, analyze, indicator list, performance, orders, version
-  write  (mutate state / place orders):  rebalance, cancel, pair, indicator set, config
+  read   (live data, no side effects):  status, plan, analyze, indicator list, performance, regime, orders, version
+  write  (mutate state / place orders):  rebalance, cancel, pair, indicator set, flag, config
   audit  (local logs only, no network):  decisions, history, performance --history, export
 
 rebalance is dry-run by default; pass --execute --confirm <token> (from plan) to place orders.'''
@@ -102,6 +110,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser('plan', parents=[common], help='Show rebalance decisions without executing.')
     _add_execution_commands(subparsers, common)
     _add_performance_command(subparsers, common)
+    _add_regime_command(subparsers, common)
+    _add_flag_command(subparsers, common)
     _add_analyze_command(subparsers, common)
     _add_indicator_command(subparsers, common)
     _add_config_command(subparsers, common)
@@ -138,6 +148,30 @@ def _add_performance_command(subparsers: argparse._SubParsersAction, common: arg
         '--history', action='store_true',
         help='Replay realized P&L from the local ledger only (no network).',
     )
+
+
+def _add_regime_command(subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
+    subparsers.add_parser(
+        'regime', parents=[common],
+        help='Flag whether the target ratio merits review (price-variance since target-set).',
+    )
+
+
+def _add_flag_command(subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
+    flag = subparsers.add_parser('flag', help='Register and evaluate milestones / watch-conditions.')
+    sub = flag.add_subparsers(dest='flag_command', metavar='<action>')
+    add = sub.add_parser('add', parents=[common], help='Register a milestone watch-condition.')
+    add.add_argument('symbol', help='Pair as BASE/QUOTE (e.g. BTC/USDT).')
+    add.add_argument('metric', choices=MILESTONE_METRICS, help='Observed metric to watch.')
+    add.add_argument(
+        'op', choices=tuple(MILESTONE_OPS),
+        help='Comparison: ge|le|gt|lt|eq (word forms avoid shell quoting).',
+    )
+    add.add_argument('value', type=float, help='Threshold the metric is compared against.')
+    add.add_argument('--note', help='Optional free-text note shown when the milestone is reported.')
+    sub.add_parser('list', parents=[common], help='List milestones and report hits against live snapshots.')
+    remove = sub.add_parser('remove', parents=[common], help='Remove a milestone by id.')
+    remove.add_argument('id', type=int, help='Milestone id (see `flag list`).')
 
 
 def _add_audit_commands(subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
@@ -293,6 +327,10 @@ def _dispatch(args: argparse.Namespace) -> ExitCode:
         return _cmd_cancel(args)
     if args.command == 'performance':
         return _cmd_performance(args)
+    if args.command == 'regime':
+        return _cmd_regime(args)
+    if args.command == 'flag':
+        return _cmd_flag(args)
     if args.command == 'analyze':
         return _cmd_analyze(args)
     if args.command == 'indicator':
@@ -503,6 +541,98 @@ def _cmd_performance_history(args: argparse.Namespace) -> ExitCode:
     payload = render.performance_history_response(records, now_iso())
     _emit(args, payload, render.performance_history_lines(records) or ['(no fills logged)'])
     return ExitCode.OK
+
+
+def _cmd_regime(args: argparse.Namespace) -> ExitCode:
+    config = _load_config(args)
+    portfolio = PortfolioStore(config.app_dir / PORTFOLIO_FILENAME)
+    pairs = _selected_pairs(portfolio, args.pair)
+    portfolio_mgr = _portfolio_manager(config)
+    snapshots = portfolio_mgr.snapshots(pairs)
+    manager = RegimeManager.from_config(config)
+    signals = [manager.signal(pair, snapshot) for pair, snapshot in zip(pairs, snapshots)]
+    payload = render.regime_response(signals, _live_meta(config))
+    _emit(args, payload, render.regime_lines(signals) or ['(no pairs configured)'])
+    return ExitCode.OK
+
+
+def _cmd_flag(args: argparse.Namespace) -> ExitCode:
+    handlers = {'add': _cmd_flag_add, 'list': _cmd_flag_list, 'remove': _cmd_flag_remove}
+    handler = handlers.get(args.flag_command)
+    if handler is None:
+        _emit(args, {'error': 'specify: flag add|list|remove'}, ['Usage: flag add|list|remove'])
+        return ExitCode.CONFIG_ERROR
+    return handler(args)
+
+
+def _cmd_flag_add(args: argparse.Namespace) -> ExitCode:
+    config = _load_config(args)
+    store = FlagsStore(config.app_dir / FLAGS_FILENAME)
+    milestone = store.add(
+        symbol=args.symbol.upper(), metric=args.metric, op=args.op,
+        threshold=args.value, note=args.note, created_at=now_iso(),
+    )
+    payload = {'command': 'flag add', 'milestone': render.milestone_to_dict(milestone)}
+    _emit(args, payload, [f'Added flag #{milestone.id}: {milestone.symbol} {milestone.expression}'])
+    return ExitCode.OK
+
+
+def _cmd_flag_list(args: argparse.Namespace) -> ExitCode:
+    config = _load_config(args)
+    store = FlagsStore(config.app_dir / FLAGS_FILENAME)
+    milestones = _filter_milestones(store.load(), args.pair)
+    meta = _live_meta(config)
+    context = _milestone_context(config, milestones, meta) if milestones else {}
+    results = FlagsManager().evaluate(milestones, context)
+    payload = render.flags_response(results, meta)
+    _emit(args, payload, render.flags_lines(results) or ['(no flags registered)'])
+    return ExitCode.OK
+
+
+def _cmd_flag_remove(args: argparse.Namespace) -> ExitCode:
+    config = _load_config(args)
+    store = FlagsStore(config.app_dir / FLAGS_FILENAME)
+    removed = store.remove(args.id)
+    payload = {'command': 'flag remove', 'removed': render.milestone_to_dict(removed)}
+    _emit(args, payload, [f'Removed flag #{removed.id}: {removed.symbol} {removed.expression}'])
+    return ExitCode.OK
+
+
+def _milestone_context(
+    config: config_mod.AppConfig, milestones: list, meta: dict[str, object]
+) -> dict[str, tuple]:
+    '''Build live (snapshot, decision) context for the configured milestone pairs.
+
+    Only configured pairs referenced by a milestone are fetched; milestones naming
+    an unconfigured symbol are left out (evaluated as ``unknown`` downstream).
+    '''
+    referenced = {milestone.symbol for milestone in milestones}
+    portfolio = PortfolioStore(config.app_dir / PORTFOLIO_FILENAME)
+    pairs = [pair for pair in portfolio.load() if pair.symbol in referenced]
+    if not pairs:
+        return {}
+    portfolio_mgr = _portfolio_manager(config)
+    rebalance_mgr = RebalanceManager.from_config(config)
+    snapshots = portfolio_mgr.snapshots(pairs)
+    now = str(meta['generated_at'])
+    return {
+        pair.symbol: (snapshot, rebalance_mgr.decide(pair, snapshot, now=now))
+        for pair, snapshot in zip(pairs, snapshots)
+    }
+
+
+def _filter_milestones(milestones: list, requested: list[str] | None) -> list:
+    '''Keep milestones whose symbol is in ``requested`` (the global --pair filter).'''
+    if not requested:
+        return milestones
+    wanted = {symbol.upper() for symbol in requested}
+    return [milestone for milestone in milestones if milestone.symbol in wanted]
+
+
+def _portfolio_manager(config: config_mod.AppConfig) -> PortfolioManager:
+    '''Build the read-side portfolio manager (exchange + state stores).'''
+    state = StateStore(config.app_dir / STATE_FILENAME, config.app_dir / HISTORY_FILENAME)
+    return PortfolioManager(_exchange_store(config), state)
 
 
 def _cmd_analyze(args: argparse.Namespace) -> ExitCode:

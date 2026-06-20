@@ -105,6 +105,7 @@ class AppConfig:
         limit_offset_pct: Limit-price offset from the touch.
         min_interval_hours: Optional cadence guard; 0 disables it.
         http_timeout_ms: Exchange HTTP timeout in milliseconds.
+        target_review_band_pct: Price move (since target-set) that flags a regime review.
         data_exchange: ccxt exchange id supplying OHLCV (may differ from ``exchange``).
         decision_timeframes: Short cadence timeframes for decisions.
         analysis_timeframes: Longer timeframes for strategy analysis.
@@ -129,6 +130,7 @@ class AppConfig:
     limit_offset_pct: float
     min_interval_hours: int
     http_timeout_ms: int
+    target_review_band_pct: float
     data_exchange: str
     decision_timeframes: tuple[str, ...]
     analysis_timeframes: tuple[str, ...]
@@ -212,6 +214,9 @@ def load_config(
         limit_offset_pct=float(glob.get('limit_offset_pct', c.DEFAULT_LIMIT_OFFSET_PCT)),
         min_interval_hours=int(glob.get('min_interval_hours', c.DEFAULT_MIN_INTERVAL_HOURS)),
         http_timeout_ms=int(glob.get('http_timeout_ms', c.DEFAULT_HTTP_TIMEOUT_MS)),
+        target_review_band_pct=float(
+            glob.get('target_review_band_pct', c.DEFAULT_TARGET_REVIEW_BAND_PCT)
+        ),
         data_exchange=data_exchange,
         decision_timeframes=_resolve_timeframes(glob, 'decision_timeframes', c.DEFAULT_DECISION_TIMEFRAMES),
         analysis_timeframes=_resolve_timeframes(glob, 'analysis_timeframes', c.DEFAULT_ANALYSIS_TIMEFRAMES),
@@ -286,6 +291,7 @@ def masked_summary(config: AppConfig) -> dict[str, object]:
         'limit_offset_pct': config.limit_offset_pct,
         'min_interval_hours': config.min_interval_hours,
         'http_timeout_ms': config.http_timeout_ms,
+        'target_review_band_pct': config.target_review_band_pct,
         'data_exchange': config.data_exchange,
         'decision_timeframes': list(config.decision_timeframes),
         'analysis_timeframes': list(config.analysis_timeframes),
@@ -495,6 +501,7 @@ quote_sanity_pct = 15.0     # reject ticker deviating > this vs recent
 limit_offset_pct = 0.0      # limit price offset from touch (0 = at best bid/ask)
 min_interval_hours = 0      # optional TOO_SOON guard; 0 = disabled (agent owns cadence)
 http_timeout_ms = 10000
+target_review_band_pct = 20.0   # flag a target-ratio review once price moves > this since target-set
 data_exchange = ''          # OHLCV source; '' = use the trading exchange
 decision_timeframes = ['1m', '5m', '15m']   # short cadence timeframes
 analysis_timeframes = ['1h', '4h', '1d', '1w']   # longer strategy timeframes
