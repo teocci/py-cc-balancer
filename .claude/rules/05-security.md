@@ -3,8 +3,7 @@
 ## Secrets Management
 
 - Never hardcode or commit: API keys, credentials, tokens, passwords, private keys, connection strings
-- Load secrets from environment variables using `os.getenv()` with a helper that raises on missing required values
-- Use `.env` files locally with `python-dotenv`; never commit `.env` files
+- For tools that authenticate to external APIs, manage credentials per [13-credentials.md](13-credentials.md) (`<tool> auth` subcommands + OS keyring); env-vars/`.env` are a fallback only
 - `.gitignore` must include: `.env`, `.env.*`, `*.pem`, `*.key`, `*_key.json`, `secrets/`, `credentials/`
 - Production: use secret management services (AWS Secrets Manager, Vault, Azure Key Vault)
 - Never log or print secrets; mask them in logs (`key[:4]...key[-4:]`)
