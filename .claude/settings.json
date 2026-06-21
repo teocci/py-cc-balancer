@@ -28,7 +28,8 @@
       "WebFetch(domain:github.com)"
     ],
     "additionalDirectories": [
-      "d:\\teocci\\code\\python\\py-cc-balancer\\dist\\ccbalancer"
+      "d:\\teocci\\code\\python\\py-cc-balancer\\dist\\ccbalancer",
+      "\\tmp"
     ]
   }
 }
