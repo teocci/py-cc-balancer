@@ -149,6 +149,19 @@ All notable changes to this project are documented here. Format follows
   - **Forced-error tests** (`tests/test_cli_errors.py`): drive `cli.main` to the documented exit codes
     `3` (offline read), `4` (sole order rejected), and `5` (partial: one placed, one rejected).
   - Finalized `docs/DESIGN.md` (exit code `6`, retry note) and verified the `CLAUDE.md` quick commands.
+- Phase 14: packaging, portable bundle & release CI — a distributable single-user tool.
+  - **`packaging/ccbalancer.spec`**: PyInstaller one-dir spec building `dist/ccbalancer/` (launcher +
+    `_internal/`, ships its own Python; entry `ccbalancer/__main__.py`, paths anchored to `SPECPATH`).
+    `collect_all('ccxt')` bundles the per-exchange data and lazy submodules; `collect_all('keyring')` +
+    `copy_metadata('keyring')` + pinned per-OS backends (`Windows`/`macOS`/`SecretService`/`chainer`/
+    `fail`) keep the credential store working frozen (file fallback regardless). `pytest`/`PyInstaller`
+    excluded from the payload.
+  - **`.github/workflows/release.yml`**: builds on Windows/Linux/macOS (unified `bash` shell), reads
+    `ccbalancer.__version__`, smoke-tests `version`/`--help`/`pair --help`/`analyze --help`, zips via
+    `shutil.make_archive`, and on `v*` tags publishes the three portable zips with
+    `softprops/action-gh-release@v2` (`contents: write`).
+  - **Docs**: README gained portable-bundle (download→extract→run), build-locally, and CI-on-tag install
+    sections; `CLAUDE.md` gained a Packaging quick-commands block.
 
 ### Fixed
 - F-1: authenticated exchange calls no longer fail with Bybit `retCode 10002` (server-timestamp /

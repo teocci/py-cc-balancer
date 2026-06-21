@@ -20,6 +20,25 @@ The CLI has **no internal timer**: the agent owns cadence.
 
 ## Install & run
 
+### Portable bundle (no Python required)
+
+Each tagged release ships a self-contained one-dir bundle per OS (Python is bundled). Download the
+zip for your platform from the [GitHub Releases](../../releases) page, extract it, and run the
+launcher — no toolchain, no `pip install`:
+
+```bash
+# Windows
+ccbalancer-windows-x86_64\ccbalancer\ccbalancer.exe version
+
+# Linux / macOS
+./ccbalancer-linux-x86_64/ccbalancer/ccbalancer version
+```
+
+Add the extracted `ccbalancer/` folder to your `PATH` to call `ccbalancer` from anywhere. The bundle
+reads and writes the same `~/.ccbalancer/` config and logs as a source install.
+
+### From source (development)
+
 > Requires **Python 3.11**. Per the project rule, call the venv binary directly — do not `activate`.
 
 ```bash
@@ -32,6 +51,17 @@ py -3.11 -m venv .venv                                  # once, if missing
 
 Configuration lives in `~/.ccbalancer/` (`config.toml`, `portfolio.json`, `auth.json`, append-only logs).
 See `config.example.toml` for every `[global]`/`[defaults]`/`[safety]` key, and **Configuration** below.
+
+### Building the bundle locally
+
+```bash
+.venv/Scripts/python -m pip install -e ".[packaging]"
+.venv/Scripts/python -m PyInstaller packaging/ccbalancer.spec   # → dist/ccbalancer/
+dist/ccbalancer/ccbalancer version                              # smoke-test the bundle
+```
+
+Pushing a `vX.Y.Z` tag triggers `.github/workflows/release.yml`, which builds and smoke-tests the
+bundle on Windows/Linux/macOS and publishes the zips to a GitHub Release.
 
 ## Command taxonomy (three categories)
 

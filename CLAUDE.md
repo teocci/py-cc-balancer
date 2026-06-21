@@ -32,6 +32,17 @@ py -3.11 -m venv .venv                                              # once, if m
 .venv/Scripts/python -m ccbalancer plan --json
 ```
 
+### Packaging (portable bundle)
+
+```bash
+.venv/Scripts/python -m pip install -e ".[packaging]"
+.venv/Scripts/python -m PyInstaller packaging/ccbalancer.spec   # → dist/ccbalancer/
+dist/ccbalancer/ccbalancer version                              # smoke-test
+```
+
+Tagging `vX.Y.Z` runs `.github/workflows/release.yml` (build + smoke on Win/Linux/macOS, publish
+portable zips to a GitHub Release). The spec collects `ccxt` + `keyring` (incl. backend metadata).
+
 ## Layout
 
 - `src/ccbalancer/` — package (`config`, `constants`, `exceptions`, `enums/`, `models/`, `stores/`, `managers/`, `utils/`, `cli`).

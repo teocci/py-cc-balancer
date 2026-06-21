@@ -1,7 +1,7 @@
 # PROGRESS
 
 **Current version:** 0.1.0 (unreleased)
-**Active phase:** Phase 14 — Packaging, portable bundle & release CI
+**Active phase:** v1 scope complete — ready for first release (`v0.1.0`)
 
 ## Phase status
 
@@ -22,7 +22,7 @@
 | Auth | Multi-profile credentials (`gh`-style) + OKX | done |
 | 12 | Regime signal + agent flags/milestones | done |
 | 13 | Hardening & docs finalize | done |
-| 14 | Packaging, portable bundle & release CI | pending |
+| 14 | Packaging, portable bundle & release CI | done |
 
 > **Redefinition (2026-06-18):** the project was re-scoped from a pure rebalancer into an agent
 > decision-support tool (read-only market intelligence + deterministic execution + offline memory).
@@ -31,7 +31,22 @@
 
 ## Next action
 
-Implement Phase 14: packaging, portable bundle & release CI.
+v1 scope is complete. Cut the first release by tagging `v0.1.0` on `main` (triggers
+`.github/workflows/release.yml`). Deferred post-v1: MCP server, DEX adapter.
+
+> Phase 14 (done): packaging, portable bundle & release CI. `packaging/ccbalancer.spec` builds a
+> PyInstaller one-dir bundle (`dist/ccbalancer/`, launcher + `_internal/`) shipping its own Python —
+> entry is `ccbalancer/__main__.py`, paths anchored to `SPECPATH` so `pyinstaller packaging/ccbalancer.spec`
+> from the repo root works. `collect_all('ccxt')` pulls the per-exchange data + lazy submodules;
+> `collect_all('keyring')` + `copy_metadata('keyring')` + pinned per-OS backends
+> (`Windows`/`macOS`/`SecretService`/`chainer`/`fail`) resolve the keyring-via-entry-points caveat so the
+> credential store still works frozen (file fallback regardless); `pytest`/`PyInstaller` excluded from the
+> bundle. `.github/workflows/release.yml` builds on Win/Linux/macOS (`bash` shell unified), reads
+> `ccbalancer.__version__`, smoke-tests `version`/`--help`/`pair --help`/`analyze --help`, zips via
+> `shutil.make_archive`, and on `v*` tags publishes the three portable zips with
+> `softprops/action-gh-release@v2` (`contents: write`). README gained portable-bundle/build-locally/
+> CI-on-tag install docs; CLAUDE.md gained a Packaging quick-commands block. Verified: local build +
+> bundle smoke (incl. `auth list` keyring path) green; full suite passes. See `docs/phases/phase-14.md`.
 
 > Phase 13 (done): hardening & docs finalize. `ExchangeStore._request` (replacing the `_translate`
 > context manager) retries transient ccxt failures (`NetworkError`/`RequestTimeout`/`DDoSProtection`/

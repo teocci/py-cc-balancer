@@ -75,11 +75,20 @@
       "PowerShell(.venv/Scripts/python -m ccbalancer --help 2>&1)",
       "PowerShell(git -C \"d:\\\\teocci\\\\code\\\\python\\\\py-cc-balancer\" diff --staged docs/IMPROVEMENTS.md)",
       "PowerShell(git -C \"d:\\\\teocci\\\\code\\\\python\\\\py-cc-balancer\" diff docs/IMPROVEMENTS.md)",
-      "PowerShell(git -C \"d:\\\\teocci\\\\code\\\\python\\\\py-cc-balancer\" status --short)"
+      "PowerShell(git -C \"d:\\\\teocci\\\\code\\\\python\\\\py-cc-balancer\" status --short)",
+      "Bash(./ccbalancer.exe version *)",
+      "Bash(./ccbalancer.exe --help)",
+      "Bash(./ccbalancer.exe pair *)",
+      "Bash(./ccbalancer.exe analyze *)",
+      "Bash(./ccbalancer.exe auth *)",
+      "Bash(rm -rf build dist ccbalancer-*.zip *.spec 2>/dev/null; ls packaging/; echo \"--- confirm root clean ---\"; ls | grep -iE \"dist|build|\\\\.zip\" || echo \"clean\")",
+      "Read(//d/d/teocci/code/python/py-cc-balancer/**)",
+      "Read(//d/d/teocci/code/python/**)"
     ],
     "additionalDirectories": [
       "d:\\teocci\\code\\python\\py-cc-balanacer\\.claude\\skills",
-      "d:\\teocci\\code\\python\\py-cc-balanacer"
+      "d:\\teocci\\code\\python\\py-cc-balanacer",
+      "D:\\teocci\\code\\python\\py-cc-balancer\\dist\\ccbalancer"
     ]
   }
 }
