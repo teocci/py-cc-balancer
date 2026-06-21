@@ -35,6 +35,7 @@ __all__ = [
     'load_config',
     'resolve_app_dir',
     'discover_config_path',
+    'resolve_login_testnet',
     'masked_summary',
     'require_credentials',
     'init_app_dir',
@@ -272,6 +273,24 @@ def _resolve_exchange(
     exchange = (source or glob.get('exchange', c.DEFAULT_EXCHANGE)).lower()
     _validate_exchange(exchange)
     return exchange
+
+
+def resolve_login_testnet(override: bool | None, cli_config: str | None = None) -> bool:
+    '''Resolve the testnet flag for ``auth login`` using the app-wide precedence.
+
+    Mirrors the resolution every other command uses (explicit flag > ``CCB_TESTNET``
+    env > TOML ``[global] testnet`` > default) so a profile created by ``auth login``
+    targets the same venue the rest of the tool would. No profile is consulted: the
+    profile being created is what defines its own venue.
+
+    Args:
+        override: Value from ``--testnet/--no-testnet`` (``None`` if unset).
+        cli_config: Explicit config path from ``--config``.
+    '''
+    app_dir = resolve_app_dir()
+    _load_dotenv(app_dir)
+    glob = _read_section(discover_config_path(cli_config, app_dir), 'global')
+    return _resolve_testnet(override, glob, None)
 
 
 def require_credentials(config: AppConfig) -> tuple[str, str]:

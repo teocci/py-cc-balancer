@@ -272,7 +272,8 @@ def _add_auth_command(subparsers: argparse._SubParsersAction, common: argparse.A
 def _add_auth_login(sub: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
     login = sub.add_parser('login', parents=[common], help='Add or update a credential profile.')
     # The exchange/sandbox for the new profile reuse the inherited --exchange and
-    # --testnet flags; --testnet defaults to None (BooleanOptionalAction) → testnet.
+    # --testnet flags. When --testnet/--no-testnet is omitted the venue is resolved
+    # from CCB_TESTNET / TOML / the default, like every other command.
     login.add_argument('--name', help='Profile name slug (default: the exchange id).')
     login.add_argument('--key', help='API key (omit to be prompted when interactive).')
     login.add_argument('--secret', help='API secret (omit to be prompted when interactive).')
@@ -790,7 +791,7 @@ def _cmd_auth(args: argparse.Namespace) -> ExitCode:
 def _cmd_auth_login(args: argparse.Namespace) -> ExitCode:
     exchange = _login_exchange(args)
     name = normalize_profile_name(args.name or exchange)
-    testnet = c.DEFAULT_TESTNET if args.testnet is None else args.testnet
+    testnet = config_mod.resolve_login_testnet(args.testnet, args.config)
     key, secret, password = _collect_credentials(args, exchange)
     profile = AuthProfile(name, exchange, testnet, key, secret, password)
     store = _auth_store(args)

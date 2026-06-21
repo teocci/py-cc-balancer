@@ -45,6 +45,26 @@ def test_login_with_key_secret(auth_env, capsys):
     assert data['profiles'][0]['api_secret'] != 'S1'  # masked
 
 
+def test_login_testnet_defaults_to_sandbox(auth_env, capsys):
+    _login(capsys, '--exchange', 'bybit', '--key', 'K', '--secret', 'S')
+    _, listing = _run(capsys, 'auth', 'list', '--json')
+    assert json.loads(listing)['profiles'][0]['testnet'] is True
+
+
+def test_login_honors_ccb_testnet_env(auth_env, monkeypatch, capsys):
+    monkeypatch.setenv('CCB_TESTNET', 'false')
+    _login(capsys, '--exchange', 'bybit', '--key', 'K', '--secret', 'S')
+    _, listing = _run(capsys, 'auth', 'list', '--json')
+    assert json.loads(listing)['profiles'][0]['testnet'] is False
+
+
+def test_login_no_testnet_flag_overrides_env(auth_env, monkeypatch, capsys):
+    monkeypatch.setenv('CCB_TESTNET', 'true')
+    _login(capsys, '--no-testnet', '--exchange', 'bybit', '--key', 'K', '--secret', 'S')
+    _, listing = _run(capsys, 'auth', 'list', '--json')
+    assert json.loads(listing)['profiles'][0]['testnet'] is False
+
+
 def test_login_name_defaults_to_exchange(auth_env, capsys):
     _login(capsys, '--exchange', 'okx', '--key', 'K', '--secret', 'S', '--passphrase', 'P')
     _, listing = _run(capsys, 'auth', 'list', '--json')
