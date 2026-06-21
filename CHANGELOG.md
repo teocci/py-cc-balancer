@@ -6,6 +6,22 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-06-21
+
+### Fixed
+- F-2: `auth login` no longer forces every new profile onto the sandbox. It hardcoded
+  `testnet = DEFAULT_TESTNET` when `--testnet/--no-testnet` was omitted — ignoring `CCB_TESTNET` and
+  TOML `[global] testnet`, unlike every other command — so valid **mainnet** keys landed in a testnet
+  profile and failed verification with `retCode 10003 "API key is invalid"`. New
+  `config.resolve_login_testnet()` applies the app-wide precedence (flag > `CCB_TESTNET` env > TOML >
+  default); the safety default (testnet) is unchanged when nothing is configured.
+
+### Changed
+- CI: release workflow bumped to Node-24-era action majors (`checkout@v7`, `setup-python@v6`,
+  `upload-artifact@v7`, `download-artifact@v8`, `action-gh-release@v3`).
+
+## [0.1.0] - 2026-06-21
+
 ### Added
 - Phase 0: project scaffold — `pyproject.toml`, `src/ccbalancer/` package skeleton,
   `__version__`, stderr logging, `version` command, and the docs/orchestration set.
@@ -169,9 +185,3 @@ All notable changes to this project are documented here. Format follows
   `options.adjustForTimeDifference = True`, so ccxt syncs to the exchange clock during `load_markets`
   (invoked by every unified private call) — `status`/`orders`/`cancel`/`performance`/`rebalance` work
   regardless of local clock skew. The canonical ccxt remedy (see `docs/cctx/02-exchanges.md`).
-- F-2: `auth login` no longer forces every new profile onto the sandbox. It hardcoded
-  `testnet = DEFAULT_TESTNET` when `--testnet/--no-testnet` was omitted — ignoring `CCB_TESTNET` and
-  TOML `[global] testnet`, unlike every other command — so valid **mainnet** keys landed in a testnet
-  profile and failed verification with `retCode 10003 "API key is invalid"`. New
-  `config.resolve_login_testnet()` applies the app-wide precedence (flag > `CCB_TESTNET` env > TOML >
-  default); the safety default (testnet) is unchanged when nothing is configured.

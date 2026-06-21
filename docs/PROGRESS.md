@@ -1,7 +1,7 @@
 # PROGRESS
 
-**Current version:** 0.1.0 (unreleased)
-**Active phase:** v1 scope complete — ready for first release (`v0.1.0`)
+**Current version:** 0.1.1
+**Active phase:** v1 released (`v0.1.0`); `v0.1.1` adds fix F-2 (auth login testnet precedence)
 
 ## Phase status
 
