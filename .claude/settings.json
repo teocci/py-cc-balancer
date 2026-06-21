@@ -66,7 +66,16 @@
       "Bash(git -C . log --oneline -1)",
       "Bash(git -C . add .claude/settings.json)",
       "Bash(git -C . commit -q --amend --no-edit)",
-      "Bash(git -C . show --stat --oneline HEAD)"
+      "Bash(git -C . show --stat --oneline HEAD)",
+      "PowerShell(.venv/Scripts/python -m pytest tests/ -q)",
+      "PowerShell(.venv/Scripts/python -m pytest -m live -v)",
+      "PowerShell(.venv/Scripts/python -m pytest tests/test_cli_errors.py tests/test_exchange.py -q 2>&1)",
+      "PowerShell(.venv/Scripts/python -m ccbalancer version)",
+      "PowerShell(.venv/Scripts/python -m ccbalancer pair list --json)",
+      "PowerShell(.venv/Scripts/python -m ccbalancer --help 2>&1)",
+      "PowerShell(git -C \"d:\\\\teocci\\\\code\\\\python\\\\py-cc-balancer\" diff --staged docs/IMPROVEMENTS.md)",
+      "PowerShell(git -C \"d:\\\\teocci\\\\code\\\\python\\\\py-cc-balancer\" diff docs/IMPROVEMENTS.md)",
+      "PowerShell(git -C \"d:\\\\teocci\\\\code\\\\python\\\\py-cc-balancer\" status --short)"
     ],
     "additionalDirectories": [
       "d:\\teocci\\code\\python\\py-cc-balanacer\\.claude\\skills",

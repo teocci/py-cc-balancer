@@ -8,4 +8,3 @@ Enhancement backlog (non-blocking, deferred). Promote to a phase when scheduled.
 | I-2 | Additional exchanges | OKX added (Bybit/Binance/OKX). ccxt supports many more; extend `SUPPORTED_EXCHANGES` + a quirks row per venue. |
 | I-3 | Market-order mode | Alternative to limit orders for immediate fills. |
 | I-4 | Multi-machine state sync | Reconcile `state.json` from exchange order history. |
-| I-5 | PyPI / pipx publish | Distribute beyond portable bundle. |

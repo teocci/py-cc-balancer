@@ -9,8 +9,9 @@ receive an instance by constructor injection and never import ccxt themselves.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
+import logging
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -30,8 +31,15 @@ if TYPE_CHECKING:
 
 __all__ = ['ExchangeStore', 'requires_passphrase']
 
+_logger = logging.getLogger(__name__)
+
 # ccxt order type: this tool only ever places limit orders (see DESIGN.md).
 _LIMIT_ORDER_TYPE = 'limit'
+
+# Calls that may not retry: order placement is non-idempotent. A RequestTimeout on
+# create_order leaves the outcome unknown — the order may already rest on the book —
+# so blindly retrying risks a duplicate fill (see docs/cctx/17-error-handling.md).
+_NO_RETRIES = 0
 
 
 @dataclass(slots=True)
@@ -42,6 +50,8 @@ class ExchangeStore:
         exchange_id: ccxt exchange id (e.g. ``'bybit'``).
         testnet: Whether to enable the exchange sandbox.
         timeout_ms: HTTP timeout passed to ccxt, in milliseconds.
+        retries: Max retries of transient failures on idempotent calls.
+        retry_backoff_ms: Base backoff between retries (doubled each attempt).
         api_key: API key, or ``None`` for public-only access.
         api_secret: API secret, or ``None`` for public-only access.
         password: Passphrase for venues that require one (e.g. OKX), else ``None``.
@@ -50,6 +60,8 @@ class ExchangeStore:
     exchange_id: str
     testnet: bool
     timeout_ms: int = c.DEFAULT_HTTP_TIMEOUT_MS
+    retries: int = c.DEFAULT_HTTP_RETRIES
+    retry_backoff_ms: int = c.DEFAULT_RETRY_BACKOFF_MS
     api_key: str | None = None
     api_secret: str | None = None
     password: str | None = None
@@ -62,6 +74,8 @@ class ExchangeStore:
             exchange_id=config.exchange,
             testnet=config.testnet,
             timeout_ms=config.http_timeout_ms,
+            retries=config.http_retries,
+            retry_backoff_ms=config.retry_backoff_ms,
             api_key=config.api_key,
             api_secret=config.api_secret,
             password=config.password,
@@ -73,8 +87,7 @@ class ExchangeStore:
         Raises:
             ExchangeError: If a required credential is missing or empty.
         '''
-        with _translate('check credentials'):
-            self.client.check_required_credentials()
+        self._request('check credentials', self.client.check_required_credentials)
 
     @property
     def client(self) -> object:
@@ -90,31 +103,29 @@ class ExchangeStore:
 
     def load_markets(self, reload: bool = False) -> dict[str, object]:
         '''Load and return the exchange's markets keyed by symbol.'''
-        with _translate('load markets'):
-            return self.client.load_markets(reload)
+        return self._request('load markets', lambda: self.client.load_markets(reload))
 
     def fetch_balance(self) -> dict[str, object]:
         '''Return the account balance structure (free/used/total per asset).'''
-        with _translate('fetch balance'):
-            return self.client.fetch_balance()
+        return self._request('fetch balance', self.client.fetch_balance)
 
     def fetch_ticker(self, symbol: str) -> dict[str, object]:
         '''Return the current ticker (last/bid/ask) for ``symbol``.'''
-        with _translate(f'fetch ticker {symbol}'):
-            return self.client.fetch_ticker(symbol)
+        return self._request(f'fetch ticker {symbol}', lambda: self.client.fetch_ticker(symbol))
 
     def fetch_open_orders(self, symbol: str | None = None) -> list[dict[str, object]]:
         '''Return open orders, optionally restricted to ``symbol``.'''
-        with _translate('fetch open orders'):
-            return self.client.fetch_open_orders(symbol)
+        return self._request('fetch open orders', lambda: self.client.fetch_open_orders(symbol))
 
     def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int) -> list[list[float]]:
         '''Return up to ``limit`` ``[time, open, high, low, close, volume]`` candles.
 
         Public market data: no API key required. Candle times are epoch ms.
         '''
-        with _translate(f'fetch ohlcv {symbol} {timeframe}'):
-            return self.client.fetch_ohlcv(symbol, timeframe, None, limit)
+        return self._request(
+            f'fetch ohlcv {symbol} {timeframe}',
+            lambda: self.client.fetch_ohlcv(symbol, timeframe, None, limit),
+        )
 
     def create_order(
         self,
@@ -133,15 +144,51 @@ class ExchangeStore:
         if client_order_id is not None:
             quirks = self.quirks
             params[quirks.client_order_id_param] = client_order_id[: quirks.max_client_order_id_len]
-        with _translate(f'create order {symbol}'):
-            return self.client.create_order(
+        return self._request(
+            f'create order {symbol}',
+            lambda: self.client.create_order(
                 symbol, _LIMIT_ORDER_TYPE, side.value, amount, price, params
-            )
+            ),
+            retries=_NO_RETRIES,
+        )
 
     def cancel_order(self, order_id: str, symbol: str | None = None) -> dict[str, object]:
-        '''Cancel the order identified by ``order_id``.'''
-        with _translate(f'cancel order {order_id}'):
-            return self.client.cancel_order(order_id, symbol)
+        '''Cancel the order identified by ``order_id``.
+
+        Idempotent and safe to retry: a successful retry confirms the cancel, while
+        a now-missing order surfaces as a domain error rather than a duplicate action.
+        '''
+        return self._request(
+            f'cancel order {order_id}', lambda: self.client.cancel_order(order_id, symbol)
+        )
+
+    def _request(self, action: str, call: Callable[[], object], *, retries: int | None = None) -> object:
+        '''Run ``call``, retrying transient failures and translating ccxt errors.
+
+        Only :class:`ccxt.NetworkError` (timeouts, DDoS protection, venue
+        unavailable) is retried, with exponential backoff; deterministic exchange
+        errors are translated to domain errors immediately and never retried.
+        '''
+        budget = self.retries if retries is None else retries
+        for attempt in range(budget + 1):
+            try:
+                return call()
+            except ccxt.NetworkError as exc:
+                if attempt >= budget:
+                    raise ExchangeError(
+                        f'Cannot {action} after {attempt + 1} attempt(s): {exc}'
+                    ) from exc
+                _logger.warning(
+                    'Transient failure on %s (%s); retry %d/%d', action, exc, attempt + 1, budget
+                )
+                time.sleep(self.retry_backoff_ms / 1000.0 * 2 ** attempt)
+            except ccxt.InsufficientFunds as exc:
+                raise InsufficientBalanceError(f'Cannot {action}: {exc}') from exc
+            except ccxt.InvalidOrder as exc:
+                raise OrderRejectedError(f'Cannot {action}: {exc}') from exc
+            except ccxt.BaseError as exc:
+                raise ExchangeError(f'Cannot {action}: {exc}') from exc
+        raise AssertionError('unreachable: retry loop always returns or raises')
 
     def _build_client(self) -> object:
         try:
@@ -177,16 +224,3 @@ def requires_passphrase(exchange_id: str) -> bool:
     if exchange_cls is None:
         return False
     return bool(exchange_cls().requiredCredentials.get('password'))
-
-
-@contextmanager
-def _translate(action: str) -> Iterator[None]:
-    '''Map ccxt errors to domain errors (most specific first).'''
-    try:
-        yield
-    except ccxt.InsufficientFunds as exc:
-        raise InsufficientBalanceError(f'Cannot {action}: {exc}') from exc
-    except ccxt.InvalidOrder as exc:
-        raise OrderRejectedError(f'Cannot {action}: {exc}') from exc
-    except ccxt.BaseError as exc:
-        raise ExchangeError(f'Cannot {action}: {exc}') from exc

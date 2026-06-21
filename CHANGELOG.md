@@ -133,6 +133,22 @@ All notable changes to this project are documented here. Format follows
     write commands `flag add|list|remove` — `add`/`remove` are local writes; `list` evaluates live and
     only fetches the milestone symbols that are configured pairs. New `FlagError` (exit 2). `--help`
     taxonomy updated to include `regime` (read) and `flag` (write).
+- Phase 13: hardening & docs finalize — resilience + an agent-usable guide.
+  - **Store retries** (`stores/exchange.py`): `ExchangeStore._request` retries transient ccxt failures
+    (`NetworkError`/`RequestTimeout`/`DDoSProtection`/`ExchangeNotAvailable`) on idempotent calls
+    (reads + `cancel_order`) with exponential backoff, then surfaces an `ExchangeError` (exit 3) once the
+    budget is spent. Order placement (`create_order`) never auto-retries: a timed-out create may have
+    landed, so a blind retry could double-fill — re-run the idempotent cancel-and-replace instead. New
+    `[global]` keys `http_retries` (default 2) and `retry_backoff_ms` (default 500), threaded through
+    `AppConfig`/`config show`/templates. ccxt→domain error translation moved into the retry helper
+    (replacing the `_translate` context manager).
+  - **README.md**: documents the agent read/write/audit workflow (`analyze`→`plan`→`regime`→`rebalance`
+    →`performance`→`decisions`), the stable JSON contract (`schema_version`, key order, enum-string
+    reasons), the exit-code table (0/2/3/4/5/6), safety guardrails, the retry/timeout/sanity-check
+    hardening, and the offline/`--require-fresh` cache paths.
+  - **Forced-error tests** (`tests/test_cli_errors.py`): drive `cli.main` to the documented exit codes
+    `3` (offline read), `4` (sole order rejected), and `5` (partial: one placed, one rejected).
+  - Finalized `docs/DESIGN.md` (exit code `6`, retry note) and verified the `CLAUDE.md` quick commands.
 
 ### Fixed
 - F-1: authenticated exchange calls no longer fail with Bybit `retCode 10002` (server-timestamp /

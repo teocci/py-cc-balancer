@@ -1,7 +1,7 @@
 # PROGRESS
 
 **Current version:** 0.1.0 (unreleased)
-**Active phase:** Phase 13 — Hardening & docs finalize
+**Active phase:** Phase 14 — Packaging, portable bundle & release CI
 
 ## Phase status
 
@@ -21,7 +21,7 @@
 | 11 | Performance & cost-basis (`performance`) | done |
 | Auth | Multi-profile credentials (`gh`-style) + OKX | done |
 | 12 | Regime signal + agent flags/milestones | done |
-| 13 | Hardening & docs finalize | pending |
+| 13 | Hardening & docs finalize | done |
 | 14 | Packaging, portable bundle & release CI | pending |
 
 > **Redefinition (2026-06-18):** the project was re-scoped from a pure rebalancer into an agent
@@ -31,7 +31,20 @@
 
 ## Next action
 
-Implement Phase 13: hardening & docs finalize.
+Implement Phase 14: packaging, portable bundle & release CI.
+
+> Phase 13 (done): hardening & docs finalize. `ExchangeStore._request` (replacing the `_translate`
+> context manager) retries transient ccxt failures (`NetworkError`/`RequestTimeout`/`DDoSProtection`/
+> `ExchangeNotAvailable`) on idempotent calls (reads + `cancel_order`) with exponential backoff, then
+> raises `ExchangeError` (exit 3) once the budget is spent; `create_order` is exempt (`retries=0`) since a
+> timed-out placement may have landed — re-run the idempotent cancel-and-replace instead. New `[global]`
+> keys `http_retries` (default 2) + `retry_backoff_ms` (default 500), threaded through `AppConfig`/
+> `config show`/templates. The `quote_sanity_pct` → `abnormal_price` guard (existing) is verified and
+> documented. New `README.md` documents the agent read/write/audit workflow (`analyze`→`plan`→`regime`→
+> `rebalance`→`performance`→`decisions`), the stable JSON contract (`schema_version`), the exit-code
+> table (0/2/3/4/5/6), safety guardrails, retry/timeout hardening, and offline/`--require-fresh` cache
+> paths. New `tests/test_cli_errors.py` drives `cli.main` to exit codes 3/4/5. `docs/DESIGN.md` finalized
+> (exit code 6 + retry note); `CLAUDE.md` quick commands verified. See `docs/phases/phase-13.md`.
 
 > Phase 12 (done): regime signal (DESIGN.md #3) + agent flags/milestones — Layer-2 defines, Layer-1
 > computes. `managers/regime_manager.py` compares price now vs `target_set_price` and, once the move

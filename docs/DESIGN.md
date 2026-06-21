@@ -77,7 +77,7 @@ evaluates them deterministically and reports hits (Layer-2 defines, Layer-1 comp
 | `exceptions.py` | `AppError` → `ConfigError`, `ExchangeError`, `InsufficientBalanceError`, `SanityCheckError`, `OrderRejectedError`, `PortfolioError`, `StateError` |
 | `enums/` | `OrderSide`, `SkipReason`, `OutputFormat` |
 | `models/` | `PairConfig`, `AssetBalance`, `PairSnapshot`, `ProposedOrder`, `RebalanceDecision`, `RebalanceState`, `HistoryEvent`, `ExecutionResult` (frozen+slots) |
-| `stores/exchange.py` | ONLY network code: thin ccxt wrapper (sandbox toggle); + `fetch_ohlcv` |
+| `stores/exchange.py` | ONLY network code: thin ccxt wrapper (sandbox toggle, timeout); bounded retries of transient failures on idempotent calls (reads + cancel; placement never auto-retries); + `fetch_ohlcv` |
 | `stores/portfolio_store.py` | read/write `portfolio.json` (pair CRUD + validation); + entry/target-set baselines |
 | `stores/state_store.py` | read/write `state.json`; append `history.jsonl` |
 | `stores/market_cache.py` | cached OHLCV under `~/.ccbalancer/ohlcv/`; TTL/staleness, offline fallback |
@@ -137,8 +137,8 @@ Idempotent: re-run cancels its own leftovers and re-places.
 Global flags: `--json`, `--dry-run`, `--pair`, `--profile`, `--exchange`, `--testnet/--no-testnet`, `--config`.
 
 JSON → stdout (stable key order, enum-string reasons, every response carries `schema_version`); logs →
-stderr. Exit codes: `0` ok/no-op, `2` config/portfolio, `3` exchange/network, `4` order rejected,
-`5` partial failure.
+stderr. Exit codes: `0` ok/no-op, `2` config/portfolio/auth/state/flag, `3` exchange/network, `4` order
+rejected, `5` partial failure, `6` safety blocked.
 
 ## Interface & scope decisions
 

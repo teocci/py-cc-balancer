@@ -5,6 +5,8 @@ quote_sanity_pct = 15.0     # reject ticker deviating > this vs recent
 limit_offset_pct = 0.0      # limit price offset from touch (0 = at best bid/ask)
 min_interval_hours = 0      # optional TOO_SOON guard; 0 = disabled (agent owns cadence)
 http_timeout_ms = 10000
+http_retries = 2            # retries of transient failures on idempotent calls (reads + cancel)
+retry_backoff_ms = 500      # base backoff between retries, doubled each attempt
 
 [defaults]                  # applied when `pair add` omits a field
 target_volatile_pct = 80.0

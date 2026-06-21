@@ -41,6 +41,8 @@ __all__ = [
     'DEFAULT_LIMIT_OFFSET_PCT',
     'DEFAULT_MIN_INTERVAL_HOURS',
     'DEFAULT_HTTP_TIMEOUT_MS',
+    'DEFAULT_HTTP_RETRIES',
+    'DEFAULT_RETRY_BACKOFF_MS',
     'DEFAULT_MAX_SESSION_NOTIONAL_USD',
     'CONFIRM_TOKEN_LENGTH',
     'DEFAULT_TARGET_VOLATILE_PCT',
@@ -135,6 +137,12 @@ DEFAULT_QUOTE_SANITY_PCT = 15.0
 DEFAULT_LIMIT_OFFSET_PCT = 0.0
 DEFAULT_MIN_INTERVAL_HOURS = 0
 DEFAULT_HTTP_TIMEOUT_MS = 10000
+# Bounded retry of transient exchange failures (timeouts, DDoS protection, venue
+# unavailable). Applied only to idempotent calls (reads + cancel); order placement
+# never auto-retries, since a timed-out create may have landed (see exchange.py).
+DEFAULT_HTTP_RETRIES = 2
+# Base backoff between retries; doubled each attempt (exponential).
+DEFAULT_RETRY_BACKOFF_MS = 500
 # Per-run cap on total notional placed across all pairs (a safety backstop, since
 # the intent-level confirm-token does not bound magnitude). 0 = unlimited (opt-out).
 DEFAULT_MAX_SESSION_NOTIONAL_USD = 1000.0

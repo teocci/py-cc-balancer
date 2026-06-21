@@ -69,8 +69,28 @@ class _RaisingClient:
         raise self._error
 
 
-def _store_with(client: object) -> ExchangeStore:
-    store = ExchangeStore('bybit', testnet=True)
+class _FlakyClient:
+    '''Raises a transient error for the first ``fail_times`` calls, then succeeds.'''
+
+    def __init__(self, error: Exception, fail_times: int) -> None:
+        self._error = error
+        self._remaining = fail_times
+        self.calls = 0
+
+    def fetch_ticker(self, symbol):
+        self.calls += 1
+        if self._remaining > 0:
+            self._remaining -= 1
+            raise self._error
+        return {'last': 42.0}
+
+    def create_order(self, *args, **kwargs):
+        self.calls += 1
+        raise self._error
+
+
+def _store_with(client: object, *, retries: int = 0) -> ExchangeStore:
+    store = ExchangeStore('bybit', testnet=True, retries=retries)
     store._client = client
     return store
 
@@ -131,6 +151,39 @@ def test_translates_ccxt_errors(error, expected):
         store.fetch_ticker('BTC/USDT')
 
 
+def test_retries_transient_failure_then_succeeds(monkeypatch):
+    sleeps: list[float] = []
+    monkeypatch.setattr('time.sleep', lambda seconds: sleeps.append(seconds))
+    client = _FlakyClient(ccxt.NetworkError('timeout'), fail_times=2)
+    store = _store_with(client, retries=2)
+
+    assert store.fetch_ticker('BTC/USDT') == {'last': 42.0}
+    assert client.calls == 3  # two failures + one success
+    assert sleeps == [0.5, 1.0]  # exponential backoff: base, then doubled
+
+
+def test_exhausting_retries_raises_exchange_error(monkeypatch):
+    sleeps: list[float] = []
+    monkeypatch.setattr('time.sleep', lambda seconds: sleeps.append(seconds))
+    client = _FlakyClient(ccxt.RequestTimeout('down'), fail_times=99)
+    store = _store_with(client, retries=2)
+
+    with pytest.raises(ExchangeError):
+        store.fetch_ticker('BTC/USDT')
+    assert client.calls == 3  # initial attempt + two retries
+    assert len(sleeps) == 2
+
+
+def test_create_order_never_retries(monkeypatch):
+    monkeypatch.setattr('time.sleep', lambda seconds: None)
+    client = _FlakyClient(ccxt.NetworkError('timeout'), fail_times=99)
+    store = _store_with(client, retries=5)  # generous budget, but placement is exempt
+
+    with pytest.raises(ExchangeError):
+        store.create_order('BTC/USDT', OrderSide.BUY, 0.1, 49000.0)
+    assert client.calls == 1  # a timed-out placement may have landed: no blind retry
+
+
 def test_build_client_unknown_exchange_raises_exchange_error():
     store = ExchangeStore('definitely_not_an_exchange', testnet=False)
     with pytest.raises(ExchangeError):
@@ -170,6 +223,8 @@ def test_from_config_maps_fields():
         limit_offset_pct=0.0,
         min_interval_hours=0,
         http_timeout_ms=8000,
+        http_retries=4,
+        retry_backoff_ms=250,
         target_review_band_pct=20.0,
         data_exchange='binance',
         decision_timeframes=('1m', '5m', '15m'),
@@ -188,6 +243,8 @@ def test_from_config_maps_fields():
     assert store.exchange_id == 'binance'
     assert store.testnet is False
     assert store.timeout_ms == 8000
+    assert store.retries == 4
+    assert store.retry_backoff_ms == 250
     assert store.api_key == 'key'
     assert store.api_secret == 'secret'
 

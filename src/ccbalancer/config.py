@@ -105,6 +105,8 @@ class AppConfig:
         limit_offset_pct: Limit-price offset from the touch.
         min_interval_hours: Optional cadence guard; 0 disables it.
         http_timeout_ms: Exchange HTTP timeout in milliseconds.
+        http_retries: Max retries of transient failures on idempotent exchange calls.
+        retry_backoff_ms: Base backoff between retries (doubled each attempt).
         target_review_band_pct: Price move (since target-set) that flags a regime review.
         data_exchange: ccxt exchange id supplying OHLCV (may differ from ``exchange``).
         decision_timeframes: Short cadence timeframes for decisions.
@@ -141,6 +143,8 @@ class AppConfig:
     api_secret: str | None
     app_dir: Path
     config_path: Path | None
+    http_retries: int = c.DEFAULT_HTTP_RETRIES
+    retry_backoff_ms: int = c.DEFAULT_RETRY_BACKOFF_MS
     indicators_path: Path | None = None
     indicators: IndicatorSettings = field(default_factory=IndicatorSettings)
     profile: str | None = None
@@ -214,6 +218,8 @@ def load_config(
         limit_offset_pct=float(glob.get('limit_offset_pct', c.DEFAULT_LIMIT_OFFSET_PCT)),
         min_interval_hours=int(glob.get('min_interval_hours', c.DEFAULT_MIN_INTERVAL_HOURS)),
         http_timeout_ms=int(glob.get('http_timeout_ms', c.DEFAULT_HTTP_TIMEOUT_MS)),
+        http_retries=int(glob.get('http_retries', c.DEFAULT_HTTP_RETRIES)),
+        retry_backoff_ms=int(glob.get('retry_backoff_ms', c.DEFAULT_RETRY_BACKOFF_MS)),
         target_review_band_pct=float(
             glob.get('target_review_band_pct', c.DEFAULT_TARGET_REVIEW_BAND_PCT)
         ),
@@ -291,6 +297,8 @@ def masked_summary(config: AppConfig) -> dict[str, object]:
         'limit_offset_pct': config.limit_offset_pct,
         'min_interval_hours': config.min_interval_hours,
         'http_timeout_ms': config.http_timeout_ms,
+        'http_retries': config.http_retries,
+        'retry_backoff_ms': config.retry_backoff_ms,
         'target_review_band_pct': config.target_review_band_pct,
         'data_exchange': config.data_exchange,
         'decision_timeframes': list(config.decision_timeframes),
@@ -501,6 +509,8 @@ quote_sanity_pct = 15.0     # reject ticker deviating > this vs recent
 limit_offset_pct = 0.0      # limit price offset from touch (0 = at best bid/ask)
 min_interval_hours = 0      # optional TOO_SOON guard; 0 = disabled (agent owns cadence)
 http_timeout_ms = 10000
+http_retries = 2            # retries of transient failures on idempotent calls (reads + cancel)
+retry_backoff_ms = 500      # base backoff between retries, doubled each attempt
 target_review_band_pct = 20.0   # flag a target-ratio review once price moves > this since target-set
 data_exchange = ''          # OHLCV source; '' = use the trading exchange
 decision_timeframes = ['1m', '5m', '15m']   # short cadence timeframes
