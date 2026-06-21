@@ -10,6 +10,7 @@
       "Bash(rm -rf build dist:*)",
       "Bash(git:*)",
       "Bash(gh:*)",
+      "Bash(gh run *)",
       "Bash(py -3.11:*)",
       "Bash(python -c:*)",
       "Bash(.venv/Scripts/python:*)",
