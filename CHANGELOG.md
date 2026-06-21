@@ -6,6 +6,11 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+- CI: release assets are now version-stamped — `ccbalancer-<version>-<platform>.zip`
+  (e.g. `ccbalancer-0.1.1-windows-x86_64.zip`) instead of `ccbalancer-<platform>.zip`,
+  so downloads from different releases no longer collide by name.
+
 ## [0.1.1] - 2026-06-21
 
 ### Fixed

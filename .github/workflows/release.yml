@@ -22,13 +22,13 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            asset: ccbalancer-linux-x86_64
+            suffix: linux-x86_64
             bin: dist/ccbalancer/ccbalancer
           - os: windows-latest
-            asset: ccbalancer-windows-x86_64
+            suffix: windows-x86_64
             bin: dist/ccbalancer/ccbalancer.exe
           - os: macos-latest
-            asset: ccbalancer-macos-arm64
+            suffix: macos-arm64
             bin: dist/ccbalancer/ccbalancer
     defaults:
       run:
@@ -62,13 +62,17 @@ jobs:
           "${{ matrix.bin }}" analyze --help
 
       - name: Zip bundle
-        run: python -c "import shutil; shutil.make_archive('${{ matrix.asset }}', 'zip', 'dist', 'ccbalancer')"
+        id: zip
+        run: |
+          asset="ccbalancer-${{ steps.version.outputs.version }}-${{ matrix.suffix }}"
+          python -c "import shutil, sys; shutil.make_archive(sys.argv[1], 'zip', 'dist', 'ccbalancer')" "$asset"
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.asset }}
-          path: ${{ matrix.asset }}.zip
+          name: ${{ steps.zip.outputs.asset }}
+          path: ${{ steps.zip.outputs.asset }}.zip
 
   release:
     name: publish release
