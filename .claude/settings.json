@@ -27,7 +27,8 @@
       "Read(//d/d/teocci/code/python/**)",
       "WebSearch",
       "WebFetch(domain:github.com)",
-      "Read(//c/Users/teocci/.ccbalancer/**)"
+      "Read(//c/Users/teocci/.ccbalancer/**)",
+      "Edit(/.claude/skills/phase-complete/**)"
     ],
     "additionalDirectories": [
       "d:\\teocci\\code\\python\\py-cc-balancer\\dist\\ccbalancer",

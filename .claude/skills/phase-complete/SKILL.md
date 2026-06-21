@@ -22,11 +22,16 @@ Before running, confirm:
 - One-line description for CHANGELOG (e.g. `I-11: wb campaign bulk-edit command`)
 - Date (today's date in `YYYY-MM-DD`)
 
-## Step 1 — Write phase detail file
+## Step 1 — Write the detail file
 
-Create `docs/phases/<id>-<slug>.md` with:
-- Phase ID, version, date, test count
-- What was built (bullet list)
+- **Phase** → `docs/phases/phase-<N>.md`
+- **Fix** → `docs/fixes/F-<N>.md` (filename matches the `F-<N>` id in `docs/FIXES.md`)
+- **Improvement** → `docs/phases/<id>-<slug>.md`
+
+Include:
+- ID, version, date, test count
+- For a phase/improvement: objective + what was built (bullet list)
+- For a fix: Symptom / Root cause / Fix sections
 - Files changed (table)
 - Any live test results or notable behaviors
 
