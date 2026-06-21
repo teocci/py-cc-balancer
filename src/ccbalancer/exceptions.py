@@ -1,0 +1,78 @@
+'''Custom exception hierarchy for ccbalancer.
+
+All application errors derive from :class:`AppError` so callers can catch the
+whole family. Specific subclasses carry domain meaning and map to CLI exit codes
+in :mod:`ccbalancer.cli`.
+'''
+
+from __future__ import annotations
+
+__all__ = [
+    'AppError',
+    'ConfigError',
+    'AuthError',
+    'PortfolioError',
+    'FlagError',
+    'StateError',
+    'ExchangeError',
+    'InsufficientBalanceError',
+    'SanityCheckError',
+    'OrderRejectedError',
+    'SafetyError',
+]
+
+
+class AppError(Exception):
+    '''Base class for all ccbalancer errors.'''
+
+
+class ConfigError(AppError):
+    '''Invalid, missing, or unreadable configuration or secrets.'''
+
+
+class AuthError(AppError):
+    '''Invalid, missing, or unresolvable auth profile or credential operation.
+
+    Raised for an unknown/selected profile that does not exist, a malformed
+    profile name (must be a slug), or a failed credential-store operation.
+    '''
+
+
+class PortfolioError(AppError):
+    '''Invalid portfolio data or a rejected pair mutation.'''
+
+
+class FlagError(AppError):
+    '''Invalid milestone definition or a rejected flag mutation.
+
+    Raised for a malformed milestone (bad symbol, unknown metric/operator) or a
+    `flag remove` referencing an id that does not exist.
+    '''
+
+
+class StateError(AppError):
+    '''Corrupt or unreadable local state/history files.'''
+
+
+class ExchangeError(AppError):
+    '''A failure talking to the exchange (network, auth, API error).'''
+
+
+class InsufficientBalanceError(AppError):
+    '''Not enough free balance to perform a proposed order.'''
+
+
+class SanityCheckError(AppError):
+    '''A market datum failed a sanity check (e.g. abnormal price).'''
+
+
+class OrderRejectedError(AppError):
+    '''The exchange rejected an order placement.'''
+
+
+class SafetyError(AppError):
+    '''Execution was refused by a safety guardrail.
+
+    Raised when the kill-switch file is present, the per-run session notional cap
+    would be exceeded, or the confirm-token is missing or does not match the plan.
+    '''
