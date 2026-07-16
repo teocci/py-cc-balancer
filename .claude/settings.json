@@ -38,7 +38,17 @@
       "Read(//d/Teocci/**)",
       "Bash(.venv/Scripts/python -c ' *)",
       "Bash(.venv/Scripts/python .claude/skills/ccxt-changelog-distill/scripts/distill.py --self-check)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(.venv/Scripts/python -m pip install -e \".[dev]\")",
+      "Bash(.venv/Scripts/python -m pytest tests/ -q)",
+      "Bash(.venv/Scripts/python -m pytest tests/)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_cli_auth.py tests/test_config.py -q)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_cli_auth.py tests/test_config.py)",
+      "Bash(timeout 30 .venv/Scripts/python -m ccbalancer version)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(.venv/Scripts/python -c \"import sys; print\\('isatty:', sys.stdin.isatty\\(\\)\\)\")",
+      "Bash(git commit -m ' *)"
     ],
     "additionalDirectories": [
       "d:\\teocci\\code\\python\\py-cc-balancer\\dist\\ccbalancer",
