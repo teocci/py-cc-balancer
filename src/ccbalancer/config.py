@@ -237,7 +237,7 @@ def load_config(
         indicators_path=indicators_path,
         indicators=IndicatorSettings(registry.resolve(read_indicator_overrides(indicators_path))),
         profile=profile.name if profile else None,
-        password=profile.password if profile else None,
+        password=profile.password if profile else os.getenv(c.ENV_PASSPHRASE),
     )
 
 
@@ -294,15 +294,27 @@ def resolve_login_testnet(override: bool | None, cli_config: str | None = None) 
 
 
 def require_credentials(config: AppConfig) -> tuple[str, str]:
-    '''Return (api_key, api_secret) or raise if either is missing.
+    '''Return (api_key, api_secret) or raise if the set is incomplete.
+
+    Venues like OKX require a third credential (passphrase) on every private
+    request; a missing one is caught here rather than surfacing as a cryptic
+    exchange-side authentication error.
 
     Raises:
-        ConfigError: If credentials are not set in the environment.
+        ConfigError: If the key, secret, or a required passphrase is missing.
     '''
     if not config.api_key or not config.api_secret:
         raise ConfigError(
             'Missing API credentials; add a profile with `ccbalancer auth login` or set '
             f'{c.ENV_API_KEY} and {c.ENV_API_SECRET} in {config.app_dir / c.ENV_FILENAME}'
+        )
+    # Local import: keeps heavy ccxt out of config's import-time cost.
+    from ccbalancer.stores.exchange import requires_passphrase
+
+    if not config.password and requires_passphrase(config.exchange):
+        raise ConfigError(
+            f'{config.exchange} requires a passphrase; set {c.ENV_PASSPHRASE} or add it with '
+            '`ccbalancer auth login --passphrase`'
         )
     return config.api_key, config.api_secret
 
@@ -587,6 +599,7 @@ ENV_TEMPLATE = '''# Secrets for ccbalancer. Never commit this file.
 # OS-keyring storage). These env vars remain a single-account fallback for CI.
 CCB_API_KEY=
 CCB_API_SECRET=
+# CCB_PASSPHRASE=   # only for venues that require one (e.g. OKX)
 # Optional non-secret overrides:
 # CCB_EXCHANGE=bybit
 # CCB_TESTNET=true

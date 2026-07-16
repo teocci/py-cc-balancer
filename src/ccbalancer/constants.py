@@ -28,6 +28,7 @@ __all__ = [
     'CCB_PREFIX',
     'ENV_API_KEY',
     'ENV_API_SECRET',
+    'ENV_PASSPHRASE',
     'ENV_EXCHANGE',
     'ENV_TESTNET',
     'ENV_CONFIG',
@@ -116,6 +117,8 @@ CCB_PREFIX = 'ccb-'
 # Environment-variable keys.
 ENV_API_KEY = 'CCB_API_KEY'
 ENV_API_SECRET = 'CCB_API_SECRET'
+# Passphrase for venues that require a third credential (e.g. OKX's OK-ACCESS-PASSPHRASE).
+ENV_PASSPHRASE = 'CCB_PASSPHRASE'
 ENV_EXCHANGE = 'CCB_EXCHANGE'
 ENV_TESTNET = 'CCB_TESTNET'
 ENV_CONFIG = 'CCB_CONFIG'

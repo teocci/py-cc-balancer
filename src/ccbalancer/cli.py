@@ -284,7 +284,7 @@ def _add_auth_login(sub: argparse._SubParsersAction, common: argparse.ArgumentPa
     )
     login.add_argument(
         '--from-env', action='store_true', dest='from_env',
-        help=f'Import {c.ENV_API_KEY}/{c.ENV_API_SECRET} from the environment.',
+        help=f'Import {c.ENV_API_KEY}/{c.ENV_API_SECRET}/{c.ENV_PASSPHRASE} from the environment.',
     )
     login.add_argument(
         '--no-verify', action='store_true', dest='no_verify',
@@ -824,7 +824,20 @@ def _emit_login(
         'verified': verified,
     }
     status = {True: 'verified', False: 'saved (credential check failed)', None: 'saved (unverified)'}
-    _emit(args, payload, [f'Logged in {profile.name} ({profile.exchange}): {status[verified]}'])
+    lines = [f'Logged in {profile.name} ({profile.exchange}): {status[verified]}']
+    if verified is False:
+        lines.extend(_login_failure_hints(profile))
+    _emit(args, payload, lines)
+
+
+def _login_failure_hints(profile: AuthProfile) -> list[str]:
+    '''Explain a failed credential check: likely testnet/passphrase misconfiguration.'''
+    hints = []
+    if profile.testnet:
+        hints.append('hint: profile targets testnet; live keys need --no-testnet')
+    if not profile.password and requires_passphrase(profile.exchange):
+        hints.append(f'hint: {profile.exchange} requires --passphrase')
+    return hints
 
 
 def _cmd_auth_logout(args: argparse.Namespace) -> ExitCode:
@@ -915,19 +928,36 @@ def _login_exchange(args: argparse.Namespace) -> str:
 
 
 def _collect_credentials(args: argparse.Namespace, exchange: str) -> tuple[str, str, str | None]:
-    '''Resolve (key, secret, passphrase): flags/env, then interactive prompts.'''
+    '''Resolve (key, secret, passphrase): flags/env, then interactive prompts.
+
+    The passphrase is resolved independently of key/secret: venues like OKX require
+    it on every private request, so a complete key+secret pair still needs it.
+    '''
     key = args.key or (os.getenv(c.ENV_API_KEY) if args.from_env else None)
     secret = args.secret or (os.getenv(c.ENV_API_SECRET) if args.from_env else None)
-    password = args.passphrase
-    if key and secret:
+    password = args.passphrase or (os.getenv(c.ENV_PASSPHRASE) if args.from_env else None)
+    needs_password = password is None and requires_passphrase(exchange)
+    if key and secret and not needs_password:
         return key, secret, password
     if not sys.stdin.isatty():
-        raise AuthError('Provide --key and --secret (or --from-env) for non-interactive login')
+        raise _non_interactive_error(exchange, key, secret, needs_password)
     key = key or getpass.getpass('API key: ')
     secret = secret or getpass.getpass('API secret: ')
-    if password is None and requires_passphrase(exchange):
+    if needs_password:
         password = getpass.getpass('Passphrase: ') or None
     return key, secret, password
+
+
+def _non_interactive_error(
+    exchange: str, key: str | None, secret: str | None, needs_password: bool
+) -> AuthError:
+    '''Build the AuthError for a non-interactive login, naming the actual gap.'''
+    if not (key and secret):
+        return AuthError('Provide --key and --secret (or --from-env) for non-interactive login')
+    return AuthError(
+        f'{exchange} requires a passphrase; pass --passphrase '
+        f'(or set {c.ENV_PASSPHRASE} with --from-env)'
+    )
 
 
 def _verify_profile(profile: AuthProfile) -> None:

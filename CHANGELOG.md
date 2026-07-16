@@ -11,6 +11,17 @@ All notable changes to this project are documented here. Format follows
   (e.g. `ccbalancer-0.1.1-windows-x86_64.zip`) instead of `ccbalancer-<platform>.zip`,
   so downloads from different releases no longer collide by name.
 
+## [0.1.2] - 2026-07-16
+
+### Fixed
+- F-3: `auth login --exchange okx --key K --secret S` no longer fails for valid **live** OKX keys.
+  OKX requires a passphrase (`OK-ACCESS-PASSPHRASE`) on every private request, but the passphrase
+  prompt was unreachable whenever key and secret were both supplied as flags/env, so the profile
+  saved with no passphrase and verification failed. The passphrase is now resolved independently of
+  key/secret, a `CCB_PASSPHRASE` env var was added (imported by `--from-env`), `require_credentials`
+  fails fast when a required passphrase is missing, and a failed login check now prints
+  testnet/passphrase hints explaining the likely cause.
+
 ## [0.1.1] - 2026-06-21
 
 ### Fixed

@@ -11,6 +11,7 @@ from ccbalancer.constants import (
     ENV_API_KEY,
     ENV_API_SECRET,
     ENV_AUTH_BACKEND,
+    ENV_PASSPHRASE,
     ExitCode,
 )
 
@@ -100,6 +101,62 @@ def test_login_non_interactive_without_creds_errors(auth_env, monkeypatch, capsy
     monkeypatch.setattr(cli.sys.stdin, 'isatty', lambda: False)
     code, _ = _login(capsys, '--exchange', 'bybit')
     assert code == int(ExitCode.CONFIG_ERROR)
+
+
+def test_login_okx_with_flags_prompts_passphrase(auth_env, monkeypatch, capsys):
+    '''Key+secret flags on OKX must still collect the required passphrase.'''
+    monkeypatch.setattr(cli.getpass, 'getpass', lambda prompt='': 'PROMPTEDPHRASE')
+    monkeypatch.setattr(cli.sys.stdin, 'isatty', lambda: True)
+    code, _ = _login(capsys, '--exchange', 'okx', '--key', 'K', '--secret', 'S')
+    assert code == int(ExitCode.OK)
+    _, listing = _run(capsys, 'auth', 'list', '--json')
+    assert json.loads(listing)['profiles'][0]['password'] is not None
+
+
+def test_login_okx_non_interactive_without_passphrase_errors(auth_env, monkeypatch, capsys):
+    '''A complete key+secret pair is still incomplete for OKX without a passphrase.'''
+    monkeypatch.setattr(cli.sys.stdin, 'isatty', lambda: False)
+    code, _ = _login(capsys, '--exchange', 'okx', '--key', 'K', '--secret', 'S')
+    assert code == int(ExitCode.CONFIG_ERROR)
+
+
+def test_non_interactive_error_names_passphrase_env():
+    '''The non-interactive guard names the actual gap (passphrase, not key/secret).'''
+    err = cli._non_interactive_error('okx', 'K', 'S', needs_password=True)
+    assert 'passphrase' in str(err).lower()
+    assert 'CCB_PASSPHRASE' in str(err)
+
+
+def test_login_okx_from_env_imports_passphrase(auth_env, monkeypatch, capsys):
+    monkeypatch.setenv(ENV_API_KEY, 'envkey1234')
+    monkeypatch.setenv(ENV_API_SECRET, 'envsecret1234')
+    monkeypatch.setenv(ENV_PASSPHRASE, 'envphrase1234')
+    code, _ = _login(capsys, '--exchange', 'okx', '--from-env')
+    assert code == int(ExitCode.OK)
+    _, listing = _run(capsys, 'auth', 'list', '--json')
+    assert json.loads(listing)['profiles'][0]['password'] is not None
+
+
+def test_login_bybit_with_flags_skips_passphrase_prompt(auth_env, monkeypatch, capsys):
+    '''Venues that need no passphrase must not prompt or error on key+secret alone.'''
+    def _boom(prompt: str = '') -> str:
+        raise AssertionError('getpass should not be called for bybit')
+
+    monkeypatch.setattr(cli.getpass, 'getpass', _boom)
+    monkeypatch.setattr(cli.sys.stdin, 'isatty', lambda: False)
+    code, _ = _login(capsys, '--exchange', 'bybit', '--key', 'K', '--secret', 'S')
+    assert code == int(ExitCode.OK)
+    _, listing = _run(capsys, 'auth', 'list', '--json')
+    assert json.loads(listing)['profiles'][0]['password'] is None
+
+
+def test_login_failed_check_hints_testnet(auth_env, monkeypatch, capsys):
+    '''A failed credential check on a testnet profile explains the likely cause.'''
+    monkeypatch.setattr(cli, '_profile_exchange_store', lambda profile: FakeExchangeStore(offline=True))
+    code, out = _run(capsys, 'auth', 'login', '--name', 'bybit-main',
+                     '--exchange', 'bybit', '--key', 'K', '--secret', 'S')
+    assert code == int(ExitCode.EXCHANGE_ERROR)
+    assert 'testnet' in out and '--no-testnet' in out
 
 
 # --- login verification -------------------------------------------------------

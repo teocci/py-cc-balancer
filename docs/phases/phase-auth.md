@@ -64,5 +64,8 @@ overridable per-invocation with a global `--profile <slug>` flag.
 
 - **Phase 14 packaging:** `keyring` pulls platform backends (`pywin32-ctypes`, etc.); the PyInstaller
   bundle must be tested with these included (or keyring excluded + file default).
-- OKX `clOrdId` length (32) and sandbox support to confirm against a live OKX key before trading there.
+- OKX passphrase plumbing fixed in [F-3](../fixes/F-3.md): `auth login` now collects the
+  `OK-ACCESS-PASSPHRASE` from `--passphrase`/`CCB_PASSPHRASE`, not only interactively. Still open:
+  confirm a `verified` login + `auth status → valid` against a **live** OKX key, and the
+  `clOrdId` length (32) before trading there.
 - `auth whoami` could surface sub-accounts via `fetch_accounts()` (deferred; would add a network call).

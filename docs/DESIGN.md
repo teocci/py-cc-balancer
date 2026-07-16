@@ -144,7 +144,8 @@ rejected, `5` partial failure, `6` safety blocked.
 
 - **Interface:** CLI + stable JSON now; **MCP server later** (thin transport over the same
   managers/stores). No importable-library coupling (would break a Go/Rust web backend).
-- **Exchange scope:** CEX-first (Bybit + Binance via ccxt); **DEX later via a separate adapter** — DEX
+- **Exchange scope:** CEX-first (Bybit + Binance + OKX via ccxt; OKX needs a passphrase, handled
+  generically via `requiredCredentials`); **DEX later via a separate adapter** — DEX
   breaks core assumptions (hot wallet key vs trade-only API key = far larger blast radius, no
   `clientOrderId` cancel-replace, gas/slippage/MEV), so it is post-v1 with its own security review.
 - **Safety guardrails** (prerequisite for autonomous write): `rebalance` dry-run by default, per-run

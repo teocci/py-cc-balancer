@@ -8,7 +8,7 @@ import pytest
 
 from ccbalancer import cli
 from ccbalancer import config as config_mod
-from ccbalancer.constants import ENV_API_KEY, ENV_API_SECRET, ENV_EXCHANGE
+from ccbalancer.constants import ENV_API_KEY, ENV_API_SECRET, ENV_EXCHANGE, ENV_PASSPHRASE
 from ccbalancer.exceptions import ConfigError
 
 
@@ -122,6 +122,32 @@ def test_require_credentials_raises_when_missing(appdir):
     cfg = config_mod.load_config()
     with pytest.raises(ConfigError):
         config_mod.require_credentials(cfg)
+
+
+def test_passphrase_resolved_from_env(appdir, monkeypatch):
+    monkeypatch.setenv(ENV_API_KEY, 'ABCD1234EFGH5678')
+    monkeypatch.setenv(ENV_API_SECRET, 'supersecretvalue')
+    monkeypatch.setenv(ENV_PASSPHRASE, 'okxphrasevalue')
+    cfg = config_mod.load_config()
+    assert cfg.password == 'okxphrasevalue'
+
+
+def test_require_credentials_raises_when_passphrase_missing(appdir, monkeypatch):
+    monkeypatch.setenv(ENV_EXCHANGE, 'okx')
+    monkeypatch.setenv(ENV_API_KEY, 'ABCD1234EFGH5678')
+    monkeypatch.setenv(ENV_API_SECRET, 'supersecretvalue')
+    cfg = config_mod.load_config()
+    with pytest.raises(ConfigError, match='passphrase'):
+        config_mod.require_credentials(cfg)
+
+
+def test_require_credentials_ok_for_okx_with_passphrase(appdir, monkeypatch):
+    monkeypatch.setenv(ENV_EXCHANGE, 'okx')
+    monkeypatch.setenv(ENV_API_KEY, 'ABCD1234EFGH5678')
+    monkeypatch.setenv(ENV_API_SECRET, 'supersecretvalue')
+    monkeypatch.setenv(ENV_PASSPHRASE, 'okxphrasevalue')
+    cfg = config_mod.load_config()
+    assert config_mod.require_credentials(cfg) == ('ABCD1234EFGH5678', 'supersecretvalue')
 
 
 def test_init_app_dir_creates_then_idempotent(appdir):

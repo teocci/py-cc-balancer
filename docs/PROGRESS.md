@@ -1,7 +1,7 @@
 # PROGRESS
 
-**Current version:** 0.1.1
-**Active phase:** v1 released (`v0.1.0`); `v0.1.1` adds fix F-2 (auth login testnet precedence)
+**Current version:** 0.1.2
+**Active phase:** v1 released (`v0.1.0`); `v0.1.2` adds fix F-3 (OKX auth login collects the passphrase)
 
 ## Phase status
 
