@@ -3,8 +3,8 @@
 > **Purpose**: Help AI agents find the right document chunk in **one hop** without scanning every file.
 > **Use**: Match the user's intent / API symbol / task keyword against the tables below, then load only the linked file.
 > **Source**: chunks `01`-`18` from [ccxt/wiki/Manual.md](https://github.com/ccxt/ccxt/blob/master/wiki/Manual.md) — Python-only, language noise removed. Chunk `19` from the [Releases API](https://github.com/ccxt/ccxt/releases), distilled to this project's ccxt surface.
-> **Version**: chunks `01`-`18` describe ccxt **at our pinned `ccxt==4.4.94`**. Anything upstream changed since then lives in [`19-changelog-impact.md`](./19-changelog-impact.md).
-> **Stats**: 19 chunks · 4,861 lines · ~68K tokens total.
+> **Version**: chunks `01`-`18` describe ccxt **at our pinned `ccxt==4.5.65`**. Anything upstream changed since then lives in [`19-changelog-impact.md`](./19-changelog-impact.md).
+> **Stats**: 19 chunks · 4,672 lines · ~64K tokens total.
 
 ---
 
@@ -260,7 +260,7 @@ Scan for keywords the user might mention. File numbers in parens.
 | 16 | [`16-private-api-contract-trading-to-string-math.md`](./16-private-api-contract-trading-to-string-math.md) | 367 | 4,134 | Contract trading, positions, proxy, string math |
 | 17 | [`17-error-handling.md`](./17-error-handling.md) | 194 | 2,963 | Retry mechanism, exception hierarchy |
 | 18 | [`18-troubleshooting.md`](./18-troubleshooting.md) | 51 | 1,079 | Debugging, verbose mode, FAQ links |
-| 19 | [`19-changelog-impact.md`](./19-changelog-impact.md) | 248 | ~4,800 | Upstream changes above the pinned ccxt version, judged against our surface; breaking-change ledger |
+| 19 | [`19-changelog-impact.md`](./19-changelog-impact.md) | 59 | ~880 | Upstream changes above the pinned ccxt version, judged against our surface; empty while pinned at tip |
 
 ---
 
@@ -271,7 +271,7 @@ Scan for keywords the user might mention. File numbers in parens.
 1. **Tiny budget (<8K tokens)**: Load this `INDEX.md` (~3K tokens) only. Pick the single most relevant chunk and load just that one.
 2. **Small budget (8–32K tokens)**: Load `INDEX.md` + 2–4 most relevant chunks for the task.
 3. **Medium budget (32–128K tokens)**: Load `INDEX.md` + the whole topic cluster (e.g. all `0X-private-api-*.md` files for a trading task).
-4. **Large budget (>128K tokens)**: Load `INDEX.md` + every chunk `01`-`19` (~68K tokens) for full cross-section context.
+4. **Large budget (>128K tokens)**: Load `INDEX.md` + every chunk `01`-`19` (~64K tokens) for full cross-section context.
 
 **Recommended agent workflow:**
 
@@ -299,7 +299,7 @@ Scan for keywords the user might mention. File numbers in parens.
 - **Per-exchange quirks** — see the [Exchange Wiki](https://github.com/ccxt/ccxt/wiki/Exchanges) for exchange-specific notes
 - **Examples repository** — https://github.com/ccxt/ccxt/tree/master/examples
 - **FAQ** — https://github.com/ccxt/ccxt/wiki/FAQ
-- **Changes newer than our pinned `ccxt==4.4.94`** — chunks `01`-`18` describe ccxt *at the pin*. Upstream deltas above it are judged in [`19-changelog-impact.md`](./19-changelog-impact.md); that file is an impact assessment scoped to our surface, not a complete changelog.
+- **Changes newer than our pinned `ccxt==4.5.65`** — chunks `01`-`18` describe ccxt *at the pin*. Upstream deltas above it are judged in [`19-changelog-impact.md`](./19-changelog-impact.md); that file is an impact assessment scoped to our surface, not a complete changelog.
 
 ---
 

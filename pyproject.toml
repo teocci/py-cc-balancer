@@ -8,7 +8,7 @@ description = 'Agent-driven crypto portfolio rebalancer CLI.'
 requires-python = '>=3.11'
 dynamic = ['version']
 dependencies = [
-    'ccxt==4.4.94',
+    'ccxt==4.5.65',
     'python-dotenv==1.0.1',
     'keyring==25.7.0',
 ]

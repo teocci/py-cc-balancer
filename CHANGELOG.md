@@ -6,6 +6,17 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-07-16
+
+### Fixed
+- F-4: OKX `auth login` (and any OKX `load_markets`) no longer crashes with
+  `TypeError: '<' not supported between instances of 'NoneType' and 'str'`. A bug in ccxt `4.4.94`
+  parsed OKX "preopen" placeholder instruments (empty `instId`) into a market with `id=None`, which
+  ccxt then stored under a `None` key and could not sort — an intermittent crash that fired only when
+  OKX happened to list such an instrument. Fixed upstream in ccxt `v4.5.57` (#28825); resolved here
+  by bumping the ccxt pin `4.4.94` → `4.5.65` (no `ccbalancer` code change). The changelog-impact
+  digest (`docs/cctx/19-changelog-impact.md`) was regenerated for the new pin.
+
 ### Changed
 - CI: release assets are now version-stamped — `ccbalancer-<version>-<platform>.zip`
   (e.g. `ccbalancer-0.1.1-windows-x86_64.zip`) instead of `ccbalancer-<platform>.zip`,

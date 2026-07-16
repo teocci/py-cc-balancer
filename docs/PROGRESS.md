@@ -1,7 +1,7 @@
 # PROGRESS
 
-**Current version:** 0.1.2
-**Active phase:** v1 released (`v0.1.0`); `v0.1.2` adds fix F-3 (OKX auth login collects the passphrase)
+**Current version:** 0.1.3
+**Active phase:** v1 released (`v0.1.0`); `v0.1.3` adds fix F-4 (bump ccxt to 4.5.65 — fixes the OKX `load_markets` preopen-instrument crash)
 
 ## Phase status
 
