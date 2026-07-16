@@ -268,6 +268,7 @@ def test_from_config_copies_relevant_settings():
         api_key=None,
         api_secret=None,
         app_dir=None,
+        data_dir=None,
         config_path=None,
     )
     manager = RebalanceManager.from_config(config)

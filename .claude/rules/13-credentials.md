@@ -11,14 +11,33 @@ this rule does not apply; manage ordinary settings per [04-no-hardcoding.md](04-
 Model the `gh` CLI. Do **not** make the user hand-edit a `.env` or config file to authenticate.
 Provide a credential lifecycle as first-class commands:
 
-- `auth login` — add/update credentials (interactive prompt by default; flags for automation)
-- `auth logout` — remove credentials (default: the active profile)
-- `auth list` — list profiles with the active marker; secrets masked
-- `auth status` — show the active profile and run a **live** credential check
-- `auth use <name>` — switch the active profile (multi-account support)
+- `auth login` — add/update credentials. Interactive prompt by default (secret via a
+  **hidden, no-echo prompt**). For automation, accept the secret however suits the tool — stdin,
+  an env var, or flags (`--with-token`, `--key`/`--secret`, etc.); `gh auth login --with-token` is
+  just one example. Prefer stdin or env where practical, since flag values can be captured in shell
+  history, process listings, and CI logs.
+- `auth logout` — remove the stored credentials.
+- `auth list` — list stored credentials with secrets masked.
+- `auth status` — show what is authenticated and run a **live** credential check.
 
-Support multiple accounts/profiles plus a one-invocation override (a `--profile` flag and an env
-var, e.g. `<TOOL>_PROFILE`).
+A single active credential set is the baseline — a tool that authenticates one account needs
+nothing more than the four commands above.
+
+### Multi-Profile Support Is Optional
+
+Profiles are a **login-level concept** — each profile *is* a distinct login/account. Add them
+**only in the special case where authentication itself is multi-account** (the user logs into more
+than one account and must switch); don't add them otherwise. When you do:
+
+- `auth login <name>` (or `--profile <name>`) both authenticates **and** registers/selects that
+  profile in one step — no separate "create profile" command (mirrors
+  `gh auth login --hostname <host>`). Omit the name to target the default profile.
+- `auth use <name>` — switch the active profile.
+- Offer a one-invocation override: a `--profile` flag **and** a `<TOOL>_PROFILE` env var.
+- `auth list` shows an active marker and `auth logout` defaults to the active profile.
+
+When profiles are **not** supported, read every mention of "the active profile" below as simply
+"the stored credential".
 
 ## OS Keyring Is the Default Secret Backend
 
@@ -34,8 +53,8 @@ var, e.g. `<TOOL>_PROFILE`).
 
 - `<TOOL>_API_KEY` / `<TOOL>_API_SECRET`-style vars resolve **only when no active profile supplies the
   secret** (CI/automation).
-- `.env` + `python-dotenv` may still load **non-secret** overrides (exchange, testnet, profile
-  selection) — never as the primary credential path.
+- `.env` + `python-dotenv` may still load **non-secret** overrides (host/endpoint, environment such
+  as testnet-vs-prod, profile selection) — never as the primary credential path.
 
 ## Never Put Secrets in Config Files
 
@@ -45,8 +64,9 @@ var, e.g. `<TOOL>_PROFILE`).
 
 ## Secret Resolution Precedence
 
-1. Active/selected auth profile (`api_key`, `api_secret`, passphrase)
-2. Environment-variable fallback
+1. Active/selected auth profile — `api_key`, `api_secret`, plus any provider-specific secret
+   (e.g. a passphrase).
+2. Environment-variable fallback.
 
 ## Invariants (Always)
 

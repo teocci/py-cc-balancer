@@ -1,7 +1,9 @@
 # PROGRESS
 
-**Current version:** 0.1.3
-**Active phase:** v1 released (`v0.1.0`); `v0.1.3` adds fix F-4 (bump ccxt to 4.5.65 — fixes the OKX `load_markets` preopen-instrument crash)
+**Current version:** 0.2.0
+**Active phase:** v1 released (`v0.1.0`); `v0.2.0` account-CLI overhaul — I-5 (command-scoped
+flags), I-6 (`--fields`), I-7 (`profile`→`account` rename), I-8 + F-5 (per-account data dirs +
+stable account identity). 432 tests. See `docs/improvements/I-5.md`…`I-8.md`, `docs/fixes/F-5.md`.
 
 ## Phase status
 

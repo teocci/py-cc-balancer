@@ -57,12 +57,12 @@ evaluates them deterministically and reports hits (Layer-2 defines, Layer-1 comp
 
 - **Exchange:** `ccxt`, default **Bybit** (Binance + OKX switchable; OKX needs a passphrase, handled
   generically via `requiredCredentials`). Trade-only API keys. Testnet supported.
-- **Account:** single active account; multiple named **auth profiles** (`gh`-style), one active at a
-  time, overridable with `--profile <slug>`. A profile owns its exchange + testnet + credentials.
-  Per-pair logical partitioning within an account (no sub-accounts).
+- **Account:** multiple named **auth accounts** (`gh`-style), one active at a time, overridable
+  with `--account <slug>` (`CCB_ACCOUNT`; legacy `CCB_PROFILE` still honored). An account owns its
+  exchange + testnet + credentials, plus its own isolated book (see per-account data dirs, I-8).
 - **Credentials:** managed by `auth login`; secrets default to the OS **keyring** (metadata-only
   `auth.json`), with a best-effort `0600` plaintext file fallback (`--no-keyring`/`CCB_AUTH_BACKEND`).
-  Legacy `CCB_API_KEY`/`CCB_API_SECRET` env vars remain a no-profile fallback for CI.
+  Legacy `CCB_API_KEY`/`CCB_API_SECRET` env vars remain a no-account fallback for CI.
 - **Orders:** limit, with cancel-and-replace ownership via `clientOrderId` prefix (`CCB_PREFIX`).
 - **Scheduling:** agent-driven; no internal timer.
 - **Three concerns:** settings (`config.toml`) vs portfolio (`portfolio.json`, CLI-managed) vs state (`state.json` + `history.jsonl`).
@@ -71,8 +71,8 @@ evaluates them deterministically and reports hits (Layer-2 defines, Layer-1 comp
 
 | Module | Owns |
 |---|---|
-| `config.py` | `AppConfig`; discovery (`--config`→`CCB_CONFIG`→`./ccbalancer.toml`→`~/.ccbalancer/config.toml`); creds via active/`--profile` profile then env; precedence flag→profile→env→TOML→default |
-| `stores/auth_store.py` | `auth.json` profiles + active pointer; slug validation; file/keyring secret backends |
+| `config.py` | `AppConfig`; discovery (`--config`→`CCB_CONFIG`→`./ccbalancer.toml`→`~/.ccbalancer/config.toml`); creds via active/`--account` then env; precedence flag→account→env→TOML→default |
+| `stores/auth_store.py` | `auth.json` accounts + active pointer; slug validation; file/keyring secret backends |
 | `constants.py` | Default band/floors, timeouts, exit codes, env keys, `CCB_PREFIX`, file names |
 | `exceptions.py` | `AppError` → `ConfigError`, `ExchangeError`, `InsufficientBalanceError`, `SanityCheckError`, `OrderRejectedError`, `PortfolioError`, `StateError` |
 | `enums/` | `OrderSide`, `SkipReason`, `OutputFormat` |
@@ -98,19 +98,33 @@ New models (frozen+slots): `IndicatorSnapshot`, `PerformanceSnapshot`, `RegimeSi
 
 ## Files & locations (`~/.ccbalancer/`)
 
+**Global / shared** (app-dir root):
+
 | File | Kind | Edited by |
 |---|---|---|
 | `config.toml` | settings (exchange, testnet, sanity %, limit offset, timeouts, defaults) | human |
 | `indicators.toml` | indicator parameter overrides (registry-validated; own concern, not in `config.toml`) | human + `indicator set` |
-| `auth.json` | auth profiles (metadata + active pointer; secrets inline only on the file backend) | CLI `auth` commands (600) |
+| `auth.json` | auth accounts (metadata + active pointer + per-account stable `id`/`account_ref`; secrets inline only on the file backend) | CLI `auth` commands (600) |
 | `.env` | legacy/fallback secrets (`CCB_API_KEY`, `CCB_API_SECRET`) | human (never committed, 600) |
+| `ohlcv/{symbol}/{timeframe}.jsonl` | cached candles for indicators (keyed by public `data_exchange`) | tool (on `analyze`) |
+| `STOP` | kill-switch (presence blocks order placement) | human |
+
+**Per-account book** — under `accounts/<account-id>/` (the active account's `id`, or `default` for the no-account env path; F-5 / I-8 isolate these so switching accounts across venues never mixes state):
+
+| File | Kind | Edited by |
+|---|---|---|
 | `portfolio.json` | pairs + per-pair target/band/notionals + entry & target-set baselines | CLI `pair` commands |
 | `state.json` | last rebalance event per pair | tool (on `rebalance`) |
 | `history.jsonl` | append-only event log | tool (on `rebalance`) |
 | `ledger.jsonl` | append-only fills (price, qty, fee) — cost-basis source | tool (on `rebalance`) |
 | `decision_log.jsonl` | append-only `decide()` rationale (inputs + guards + order) | tool (on `plan`/`rebalance`) |
-| `ohlcv/{symbol}/{timeframe}.jsonl` | cached candles for indicators | tool (on `analyze`) |
 | `flags.json` | agent/user milestones & watch-conditions | CLI `flag` commands |
+
+The `id` is minted once at first save and is stable across `auth rename` and credential
+rotation, so an account's book is never stranded. A best-effort `account_ref` (hashed exchange
+account id, captured online at login) guards rotation: a renewed key resolving to a *different*
+exchange account is refused (`--force` overrides). A one-time migration moves any pre-0.2.0
+root-level book files into the active account's directory.
 
 ## Decision logic (pure)
 
@@ -134,7 +148,9 @@ Idempotent: re-run cancels its own leftovers and re-places.
 - **audit** (local logs only, no network, no side effects): `decisions` · `history` ·
   `performance --history` · `export`
 
-Global flags: `--json`, `--dry-run`, `--pair`, `--profile`, `--exchange`, `--testnet/--no-testnet`, `--config`.
+Flags are command-scoped (composable parents): universal `--json`, `--fields`, `--config`;
+credential/venue commands add `--account`, `--exchange`, `--testnet/--no-testnet`; pair-filtering
+commands add `--pair`. Each command's `--help` lists only the flags its handler reads.
 
 JSON → stdout (stable key order, enum-string reasons, every response carries `schema_version`); logs →
 stderr. Exit codes: `0` ok/no-op, `2` config/portfolio/auth/state/flag, `3` exchange/network, `4` order

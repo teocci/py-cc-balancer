@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ccbalancer.models.auth_profile import AuthProfile
+from ccbalancer.models.account import Account
 from ccbalancer.models.balance import AssetBalance, PairSnapshot
 from ccbalancer.models.decision import ProposedOrder, RebalanceDecision
 from ccbalancer.models.fill import Fill
@@ -15,7 +15,7 @@ from ccbalancer.models.result import ExecutionResult
 from ccbalancer.models.state import HistoryEvent, RebalanceState
 
 __all__ = [
-    'AuthProfile',
+    'Account',
     'PairConfig',
     'AssetBalance',
     'PairSnapshot',

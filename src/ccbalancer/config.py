@@ -2,8 +2,8 @@
 
 Settings come from three layers with this precedence: environment variables →
 TOML config file → built-in defaults. Credentials are resolved from the active
-(or ``--profile``-selected) auth profile when one exists, falling back to the
-``CCB_API_KEY``/``CCB_API_SECRET`` environment for back-compat; a resolved profile
+(or ``--account``-selected) auth account when one exists, falling back to the
+``CCB_API_KEY``/``CCB_API_SECRET`` environment for back-compat; a resolved account
 also supplies its exchange and testnet flag (overridable by an explicit flag).
 
 Discovery order for the config file (first existing wins): an explicit ``--config``
@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 
 from ccbalancer import constants as c
 from ccbalancer.exceptions import AuthError, ConfigError
-from ccbalancer.models.auth_profile import AuthProfile
+from ccbalancer.models.account import Account
 from ccbalancer.stores.auth_store import AuthStore, backend_for
 from ccbalancer.utils import indicator_registry as registry
 
@@ -115,15 +115,17 @@ class AppConfig:
         ohlcv_limit: Number of candles fetched per timeframe.
         defaults: Per-pair default values.
         indicators: Resolved indicator parameters and thresholds.
-        api_key: Resolved API key (from the active profile or env), or ``None``.
-        api_secret: Resolved API secret (from the active profile or env), or ``None``.
-        app_dir: The resolved ``~/.ccbalancer`` directory.
+        api_key: Resolved API key (from the active account or env), or ``None``.
+        api_secret: Resolved API secret (from the active account or env), or ``None``.
+        app_dir: The resolved ``~/.ccbalancer`` directory (global/shared files).
+        data_dir: The active account's per-account book directory
+            (``app_dir/accounts/<account-id>`` or ``.../default``).
         config_path: The config file used, or ``None`` if none was found.
         indicators_path: Location of ``indicators.toml`` (read/written by the
             indicator commands), or ``None`` in synthetic configs.
         indicators: Resolved indicator parameters and thresholds.
         safety: Execution safety guardrails.
-        profile: Name of the resolved auth profile, or ``None`` (legacy env path).
+        account: Name of the resolved auth account, or ``None`` (legacy env path).
         password: Resolved passphrase for venues that require one (e.g. OKX), else ``None``.
     '''
 
@@ -143,12 +145,13 @@ class AppConfig:
     api_key: str | None
     api_secret: str | None
     app_dir: Path
+    data_dir: Path
     config_path: Path | None
     http_retries: int = c.DEFAULT_HTTP_RETRIES
     retry_backoff_ms: int = c.DEFAULT_RETRY_BACKOFF_MS
     indicators_path: Path | None = None
     indicators: IndicatorSettings = field(default_factory=IndicatorSettings)
-    profile: str | None = None
+    account: str | None = None
     password: str | None = None
 
 
@@ -180,16 +183,16 @@ def load_config(
     cli_config: str | None = None,
     exchange_override: str | None = None,
     testnet_override: bool | None = None,
-    profile_override: str | None = None,
+    account_override: str | None = None,
     auth_store: AuthStore | None = None,
 ) -> AppConfig:
-    '''Resolve settings from the auth profile, env, TOML, and defaults.
+    '''Resolve settings from the auth account, env, TOML, and defaults.
 
     Args:
         cli_config: Explicit config path from ``--config``.
         exchange_override: Exchange id from ``--exchange``.
         testnet_override: Value from ``--testnet/--no-testnet``.
-        profile_override: Profile name from ``--profile``.
+        account_override: Account name from ``--account``.
         auth_store: Injected store (tests); built from the app dir when ``None``.
 
     Returns:
@@ -197,7 +200,7 @@ def load_config(
 
     Raises:
         ConfigError: If the config file is unreadable or the exchange is unsupported.
-        AuthError: If a selected profile name does not exist.
+        AuthError: If a selected account name does not exist.
     '''
     app_dir = resolve_app_dir()
     _load_dotenv(app_dir)
@@ -205,10 +208,15 @@ def load_config(
     glob = _read_section(config_path, 'global')
     defaults = _build_defaults(_read_section(config_path, 'defaults'))
     safety = _build_safety(_read_section(config_path, 'safety'), app_dir)
-    profile = _resolve_profile(app_dir, profile_override, auth_store)
 
-    exchange = _resolve_exchange(exchange_override, profile, glob)
-    testnet = _resolve_testnet(testnet_override, glob, profile)
+    store = auth_store or AuthStore(app_dir / c.AUTH_FILENAME, backend_for(app_dir / c.AUTH_FILENAME))
+    store.ensure_ids()  # one-time: assign stable ids to pre-0.2.0 accounts
+    account = _resolve_account(app_dir, account_override, store)
+    data_dir = _account_data_dir(app_dir, account)
+    _migrate_legacy_book(app_dir, data_dir)  # move root books into the resolved account's dir
+
+    exchange = _resolve_exchange(exchange_override, account, glob)
+    testnet = _resolve_testnet(testnet_override, glob, account)
     data_exchange = _resolve_data_exchange(glob, exchange)
     indicators_path = app_dir / c.INDICATORS_FILENAME
 
@@ -230,46 +238,85 @@ def load_config(
         ohlcv_limit=int(glob.get('ohlcv_limit', c.DEFAULT_OHLCV_LIMIT)),
         defaults=defaults,
         safety=safety,
-        api_key=profile.api_key if profile else os.getenv(c.ENV_API_KEY),
-        api_secret=profile.api_secret if profile else os.getenv(c.ENV_API_SECRET),
+        api_key=account.api_key if account else os.getenv(c.ENV_API_KEY),
+        api_secret=account.api_secret if account else os.getenv(c.ENV_API_SECRET),
         app_dir=app_dir,
+        data_dir=data_dir,
         config_path=config_path,
         indicators_path=indicators_path,
         indicators=IndicatorSettings(registry.resolve(read_indicator_overrides(indicators_path))),
-        profile=profile.name if profile else None,
-        password=profile.password if profile else os.getenv(c.ENV_PASSPHRASE),
+        account=account.name if account else None,
+        password=account.password if account else os.getenv(c.ENV_PASSPHRASE),
     )
 
 
-def _resolve_profile(
+def _resolve_account(
     app_dir: Path,
-    profile_override: str | None,
+    account_override: str | None,
     auth_store: AuthStore | None,
-) -> AuthProfile | None:
-    '''Resolve the active profile: ``--profile`` > ``CCB_PROFILE`` > active pointer.
+) -> Account | None:
+    '''Resolve the active account: ``--account`` > ``CCB_ACCOUNT`` > active pointer.
 
-    Returns ``None`` when no profile is selected (the legacy env credential path).
+    ``CCB_PROFILE`` is honored as a deprecated alias for ``CCB_ACCOUNT``. Returns
+    ``None`` when no account is selected (the legacy env credential path).
 
     Raises:
-        AuthError: If a selected profile name does not exist.
+        AuthError: If a selected account name does not exist.
     '''
     auth_path = app_dir / c.AUTH_FILENAME
     store = auth_store or AuthStore(auth_path, backend_for(auth_path))
-    name = profile_override or os.getenv(c.ENV_PROFILE) or store.active_name()
+    env_name = os.getenv(c.ENV_ACCOUNT) or os.getenv(c.ENV_PROFILE)
+    name = account_override or env_name or store.active_name()
     if name is None:
         return None
-    profile = store.get(name)
-    if profile is None:
-        raise AuthError(f'Profile {name!r} not found; run `ccbalancer auth list`')
-    return profile
+    account = store.get(name)
+    if account is None:
+        raise AuthError(f'Account {name!r} not found; run `ccbalancer auth list`')
+    return account
+
+
+# Per-account book files (isolated under the account's data dir). OHLCV and the
+# STOP kill-switch are deliberately excluded — they are global/public.
+_BOOK_FILENAMES = (
+    c.PORTFOLIO_FILENAME, c.STATE_FILENAME, c.HISTORY_FILENAME,
+    c.LEDGER_FILENAME, c.DECISION_LOG_FILENAME, c.FLAGS_FILENAME,
+)
+
+
+def _account_data_dir(app_dir: Path, account: Account | None) -> Path:
+    '''Return the per-account data directory (or the default scope when none).'''
+    scope = account.id if (account and account.id) else c.DEFAULT_ACCOUNT_SCOPE
+    return app_dir / c.ACCOUNTS_DIRNAME / scope
+
+
+def _migrate_legacy_book(app_dir: Path, data_dir: Path) -> None:
+    '''Move any pre-0.2.0 root-level book files into ``data_dir``.
+
+    One-time and idempotent. The target is the data dir of the account resolved
+    for this invocation, so the migrated book is exactly what the current command
+    reads (no divergence between where books land and which account is active).
+
+    Each legacy file is moved independently: a file whose target already exists
+    is left in place (the scoped book wins; never clobbered), so one pre-existing
+    scoped file cannot strand the remaining root-level books.
+    '''
+    legacy = [name for name in _BOOK_FILENAMES if (app_dir / name).is_file()]
+    if not legacy:
+        return
+    data_dir.mkdir(parents=True, exist_ok=True)
+    for name in legacy:
+        target = data_dir / name
+        if target.exists():
+            continue  # an already-scoped book is authoritative; don't clobber it
+        (app_dir / name).replace(target)
 
 
 def _resolve_exchange(
     override: str | None,
-    profile: AuthProfile | None,
+    account: Account | None,
     glob: dict[str, object],
 ) -> str:
-    source = override or (profile.exchange if profile else None) or os.getenv(c.ENV_EXCHANGE)
+    source = override or (account.exchange if account else None) or os.getenv(c.ENV_EXCHANGE)
     exchange = (source or glob.get('exchange', c.DEFAULT_EXCHANGE)).lower()
     _validate_exchange(exchange)
     return exchange
@@ -279,9 +326,9 @@ def resolve_login_testnet(override: bool | None, cli_config: str | None = None) 
     '''Resolve the testnet flag for ``auth login`` using the app-wide precedence.
 
     Mirrors the resolution every other command uses (explicit flag > ``CCB_TESTNET``
-    env > TOML ``[global] testnet`` > default) so a profile created by ``auth login``
-    targets the same venue the rest of the tool would. No profile is consulted: the
-    profile being created is what defines its own venue.
+    env > TOML ``[global] testnet`` > default) so an account created by ``auth login``
+    targets the same venue the rest of the tool would. No account is consulted: the
+    account being created is what defines its own venue.
 
     Args:
         override: Value from ``--testnet/--no-testnet`` (``None`` if unset).
@@ -305,7 +352,7 @@ def require_credentials(config: AppConfig) -> tuple[str, str]:
     '''
     if not config.api_key or not config.api_secret:
         raise ConfigError(
-            'Missing API credentials; add a profile with `ccbalancer auth login` or set '
+            'Missing API credentials; add an account with `ccbalancer auth login` or set '
             f'{c.ENV_API_KEY} and {c.ENV_API_SECRET} in {config.app_dir / c.ENV_FILENAME}'
         )
     # Local import: keeps heavy ccxt out of config's import-time cost.
@@ -346,11 +393,12 @@ def masked_summary(config: AppConfig) -> dict[str, object]:
             'max_session_notional_usd': config.safety.max_session_notional_usd,
             'kill_switch_path': str(config.safety.kill_switch_path),
         },
-        'profile': config.profile,
+        'account': config.account,
         'api_key': _mask(config.api_key),
         'api_secret': _mask(config.api_secret),
         'password': _mask(config.password),
         'app_dir': str(config.app_dir),
+        'data_dir': str(config.data_dir),
         'config_path': str(config.config_path) if config.config_path else None,
     }
 
@@ -470,14 +518,14 @@ def _toml_value(value: object) -> str:
 def _resolve_testnet(
     override: bool | None,
     glob: dict[str, object],
-    profile: AuthProfile | None = None,
+    account: Account | None = None,
 ) -> bool:
-    # Precedence: explicit flag > profile > env > TOML > default. A profile owns
+    # Precedence: explicit flag > account > env > TOML > default. A account owns
     # its account, so it outranks a stray CCB_TESTNET in the shell.
     if override is not None:
         return override
-    if profile is not None:
-        return profile.testnet
+    if account is not None:
+        return account.testnet
     env_value = os.getenv(c.ENV_TESTNET)
     if env_value is not None:
         return _parse_bool(env_value)
@@ -603,5 +651,5 @@ CCB_API_SECRET=
 # Optional non-secret overrides:
 # CCB_EXCHANGE=bybit
 # CCB_TESTNET=true
-# CCB_PROFILE=bybit-main   # select an auth profile by name
+# CCB_ACCOUNT=bybit-main   # select an auth account by name (CCB_PROFILE still works)
 '''

@@ -31,10 +31,10 @@ class ConfigError(AppError):
 
 
 class AuthError(AppError):
-    '''Invalid, missing, or unresolvable auth profile or credential operation.
+    '''Invalid, missing, or unresolvable auth account or credential operation.
 
-    Raised for an unknown/selected profile that does not exist, a malformed
-    profile name (must be a slug), or a failed credential-store operation.
+    Raised for an unknown/selected account that does not exist, a malformed
+    account name (must be a slug), or a failed credential-store operation.
     '''
 
 

@@ -54,11 +54,11 @@ def _seed_history(appdir) -> None:
 # --- plan writes the decision memory --------------------------------------
 
 
-def test_plan_appends_one_decision_record_per_pair(appdir, monkeypatch, fake_exchange, capsys):
+def test_plan_appends_one_decision_record_per_pair(appdir, data_dir, monkeypatch, fake_exchange, capsys):
     _add_pair(appdir)
     monkeypatch.setattr(cli, '_exchange_store', lambda config: fake_exchange)
     cli.main(['plan', '--json'])
-    lines = (appdir / DECISION_LOG_FILENAME).read_text(encoding='utf-8').splitlines()
+    lines = (data_dir / DECISION_LOG_FILENAME).read_text(encoding='utf-8').splitlines()
     assert len(lines) == 1
     record = json.loads(lines[0])
     assert record['symbol'] == 'BTC/USDT'
@@ -66,20 +66,20 @@ def test_plan_appends_one_decision_record_per_pair(appdir, monkeypatch, fake_exc
     assert record['reason'] == 'ok'
 
 
-def test_plan_run_twice_appends_each_time(appdir, monkeypatch, fake_exchange):
+def test_plan_run_twice_appends_each_time(appdir, data_dir, monkeypatch, fake_exchange):
     _add_pair(appdir)
     monkeypatch.setattr(cli, '_exchange_store', lambda config: fake_exchange)
     cli.main(['plan', '--json'])
     cli.main(['plan', '--json'])
-    lines = (appdir / DECISION_LOG_FILENAME).read_text(encoding='utf-8').splitlines()
+    lines = (data_dir / DECISION_LOG_FILENAME).read_text(encoding='utf-8').splitlines()
     assert len(lines) == 2
 
 
-def test_status_does_not_write_decision_log(appdir, monkeypatch):
+def test_status_does_not_write_decision_log(appdir, data_dir, monkeypatch):
     _add_pair(appdir)
     monkeypatch.setattr(cli, '_exchange_store', lambda config: _balanced_exchange())
     cli.main(['status', '--json'])
-    assert not (appdir / DECISION_LOG_FILENAME).exists()
+    assert not (data_dir / DECISION_LOG_FILENAME).exists()
 
 
 def _balanced_exchange() -> FakeExchangeStore:

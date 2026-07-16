@@ -17,7 +17,7 @@ Runs the standard 5-step finalization sequence after a phase or fix is fully don
 ## Required inputs
 
 Before running, confirm:
-- Phase/fix ID (e.g. `I-11`, `F-9`)
+- Phase/improvement/fix ID (e.g. `P-1`, `I-11`, `F-9`)
 - Version number (e.g. `0.24.0` for improvement, `0.23.1` for fix)
 - One-line description for CHANGELOG (e.g. `I-11: wb campaign bulk-edit command`)
 - Date (today's date in `YYYY-MM-DD`)
@@ -26,7 +26,7 @@ Before running, confirm:
 
 - **Phase** → `docs/phases/phase-<N>.md`
 - **Fix** → `docs/fixes/F-<N>.md` (filename matches the `F-<N>` id in `docs/FIXES.md`)
-- **Improvement** → `docs/phases/<id>-<slug>.md`
+- **Improvement** → `docs/improvements/I-<N>.md` (filename matches the `I-<N>` id in `docs/IMPROVEMENTS.md`)
 
 Include:
 - ID, version, date, test count
@@ -50,7 +50,7 @@ Add at the top of the file (below the header), after the previous entry:
 
 ## Step 4 — Clean up docs/FIXES.md or docs/IMPROVEMENTS.md
 
-If this was a fix: update the row in `docs/FIXES.md` index table (status → ✅ DONE, version filled in). Remove any detail stub below the table — that content now lives in `docs/phases/`.
+If this was a fix: update the row in `docs/FIXES.md` index table (status → ✅ DONE, version filled in). Remove any detail stub below the table — that content now lives in `docs/phases/` or `docs/improvements/` or `docs/fixes/`.
 
 If this was an improvement: same for `docs/IMPROVEMENTS.md`.
 
@@ -86,7 +86,7 @@ This triggers the GitHub Release workflow (`.github/workflows/release.yml`), whi
 
 ## Verification checklist
 
-- [ ] `docs/phases/<id>.md` exists and has full detail
+- [ ] `docs/phases/<id>.md` or `docs/improvements/<id>.md` or `docs/fixes/<id>.md` exists and has full detail
 - [ ] `docs/PROGRESS.md` Quick Status version matches new version
 - [ ] `docs/PROGRESS.md` phase row shows ✅ DONE
 - [ ] `CHANGELOG.md` has new entry at top

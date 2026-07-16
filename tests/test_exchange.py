@@ -235,6 +235,7 @@ def test_from_config_maps_fields():
         api_key='key',
         api_secret='secret',
         app_dir=None,
+        data_dir=None,
         config_path=None,
     )
 

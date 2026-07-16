@@ -73,8 +73,10 @@ Commands are grouped by side effect — visible in `--help` so an agent can tell
 | **write** | mutate state / place orders (dry-run by default, guarded) | `rebalance` · `cancel` · `pair` · `indicator set` · `flag` · `config` · `auth` |
 | **audit** | local logs only, **no network** | `decisions` · `history` · `performance --history` · `export` |
 
-Global flags: `--json` · `--pair SYMBOL` (repeatable) · `--profile NAME` · `--exchange` ·
-`--testnet/--no-testnet` · `--config PATH`.
+Flags are command-scoped — each command's `--help` shows only what it uses. Universal:
+`--json` · `--fields a,b,c` (project JSON to top-level keys) · `--config PATH`. Credential/venue
+commands add `--account NAME` · `--exchange` · `--testnet/--no-testnet`; pair-filtering commands
+add `--pair SYMBOL` (repeatable).
 
 ## The agent workflow
 
@@ -198,16 +200,17 @@ A missing/stale token or a tripped guard exits `6` and places nothing.
 ## Configuration & credentials
 
 - **Settings** (`~/.ccbalancer/config.toml`): exchange, testnet, sanity %, limit offset, timeouts, retries,
-  per-pair defaults, and `[safety]`. Resolution precedence: **CLI flag → auth profile → env → TOML →
+  per-pair defaults, and `[safety]`. Resolution precedence: **CLI flag → auth account → env → TOML →
   built-in default**.
-- **Credentials** are managed `gh`-style by `auth login` into named **profiles** (one active at a time,
-  overridable with `--profile`). Secrets default to the OS **keyring**, with a best-effort `0600`
-  plaintext file fallback (`--no-keyring`). Legacy `CCB_API_KEY`/`CCB_API_SECRET` env vars remain a
-  no-profile fallback for CI. Secrets are always masked in output.
+- **Credentials** are managed `gh`-style by `auth login` into named **accounts** (one active at a time,
+  overridable with `--account`; `CCB_ACCOUNT`, legacy `CCB_PROFILE` still honored). Secrets default to
+  the OS **keyring**, with a best-effort `0600` plaintext file fallback (`--no-keyring`). Legacy
+  `CCB_API_KEY`/`CCB_API_SECRET` env vars remain a no-account fallback for CI. Secrets are always
+  masked in output.
 
 ```bash
-ccbalancer auth login --name bybit-main --exchange bybit          # prompts for key/secret (+passphrase on OKX)
-ccbalancer auth list                                              # profiles, active marked, secrets masked
+ccbalancer auth login --account bybit-main --exchange bybit       # prompts for key/secret (+passphrase on OKX)
+ccbalancer auth list                                              # accounts, active marked, secrets masked
 ccbalancer auth use bybit-main
 ccbalancer pair add BTC/USDT --target 80/20 --band 5 --entry-price 50000 --invested 10000
 ```

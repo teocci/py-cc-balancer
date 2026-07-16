@@ -9,9 +9,12 @@ import pytest
 
 from ccbalancer import config as config_mod
 from ccbalancer.constants import (
+    ACCOUNTS_DIRNAME,
+    DEFAULT_ACCOUNT_SCOPE,
     ENV_API_KEY,
     ENV_API_SECRET,
     ENV_AUTH_BACKEND,
+    ENV_ACCOUNT,
     ENV_CONFIG,
     ENV_EXCHANGE,
     ENV_PROFILE,
@@ -28,9 +31,21 @@ def appdir(tmp_path, monkeypatch):
     monkeypatch.setattr(config_mod, 'resolve_app_dir', lambda: directory)
     monkeypatch.chdir(tmp_path)
     for key in (ENV_API_KEY, ENV_API_SECRET, ENV_EXCHANGE, ENV_TESTNET, ENV_CONFIG,
-                ENV_PROFILE, ENV_AUTH_BACKEND):
+                ENV_ACCOUNT, ENV_PROFILE, ENV_AUTH_BACKEND):
         monkeypatch.delenv(key, raising=False)
     return directory
+
+
+@pytest.fixture
+def data_dir(appdir):
+    '''The default per-account data dir the CLI writes to when no account is set.
+
+    With no auth account configured, ``config.data_dir`` resolves to
+    ``<app_dir>/accounts/default`` — where per-account books (portfolio, state,
+    ledger, decisions, flags) live. Tests that read a CLI-written book directly
+    should use this rather than the app-dir root.
+    '''
+    return appdir / ACCOUNTS_DIRNAME / DEFAULT_ACCOUNT_SCOPE
 
 
 class FakeKeyring:
@@ -101,7 +116,9 @@ class FakeExchangeStore:
         open_orders: list[dict[str, object]] | None = None,
         ohlcv: dict[tuple[str, str], list[list[float]]] | None = None,
         offline: bool = False,
+        account_ref: str | None = None,
     ) -> None:
+        self._account_ref = account_ref
         self.markets = markets or {}
         self.balance = balance or {'free': {}, 'used': {}, 'total': {}}
         self.tickers = tickers or {}
@@ -119,6 +136,9 @@ class FakeExchangeStore:
 
     def check_credentials(self) -> None:
         return None
+
+    def account_ref(self) -> str | None:
+        return self._account_ref
 
     def fetch_balance(self) -> dict[str, object]:
         if self.offline:

@@ -9,6 +9,7 @@ receive an instance by constructor injection and never import ccxt themselves.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import time
 from collections.abc import Callable
@@ -151,6 +152,50 @@ class ExchangeStore:
             ),
             retries=_NO_RETRIES,
         )
+
+    def account_ref(self) -> str | None:
+        '''Return a best-effort stable, hashed exchange account id, or ``None``.
+
+        Prefers ccxt's unified ``fetch_accounts()``; falls back to a per-venue
+        private endpoint (Bybit ``/v5/user/query-api``, Binance ``/api/v3/account``,
+        OKX ``/api/v5/account/config``). The underlying uid is an account/user id —
+        stable across API-key rotation — so it recognizes the same real account
+        after a re-login. The uid (namespaced by exchange id) is hashed into an
+        opaque fixed-length key. Best-effort: never raises; returns ``None`` when
+        no id is obtainable (unsupported venue, auth/network failure).
+        '''
+        uid = self._raw_account_uid()
+        if uid is None:
+            return None
+        return hashlib.sha256(f'{self.exchange_id}:{uid}'.encode()).hexdigest()[:32]
+
+    def _raw_account_uid(self) -> str | None:
+        '''Fetch the raw exchange account uid via unified then per-venue calls.
+
+        ``self.client`` is read inside each ``try`` so a failing lazy client build
+        (raising :class:`ExchangeError`) is swallowed too, keeping the public
+        :meth:`account_ref` contract ("never raises") self-enforcing.
+        '''
+        try:  # Tier 1: unified fetch_accounts() (implemented by OKX)
+            accounts = self.client.fetch_accounts()
+            if accounts and accounts[0].get('id'):
+                return str(accounts[0]['id'])
+        except (ccxt.BaseError, ExchangeError, AttributeError, KeyError, IndexError, TypeError):
+            pass
+        try:  # Tier 2: per-venue private endpoint (Bybit / Binance raise on Tier 1)
+            client = self.client
+            if self.exchange_id == 'bybit':
+                result = client.privateGetV5UserQueryApi().get('result') or {}
+                return str(result['userID']) if result.get('userID') is not None else None
+            if self.exchange_id == 'binance':
+                uid = client.privateGetAccount().get('uid')
+                return str(uid) if uid is not None else None
+            if self.exchange_id == 'okx':
+                data = client.privateGetAccountConfig().get('data') or []
+                return str(data[0]['uid']) if data and data[0].get('uid') is not None else None
+        except (ccxt.BaseError, ExchangeError, AttributeError, KeyError, IndexError, TypeError):
+            return None
+        return None
 
     def cancel_order(self, order_id: str, symbol: str | None = None) -> dict[str, object]:
         '''Cancel the order identified by ``order_id``.

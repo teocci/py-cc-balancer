@@ -20,7 +20,7 @@ from ccbalancer.constants import CCB_PREFIX, SCHEMA_VERSION
 
 if TYPE_CHECKING:
     from ccbalancer.models import (
-        AuthProfile,
+        Account,
         ExecutionResult,
         IndicatorSnapshot,
         Milestone,
@@ -57,7 +57,7 @@ __all__ = [
     'rebalance_exec_response',
     'orders_response',
     'cancel_response',
-    'masked_profile',
+    'masked_account',
     'auth_list_response',
     'auth_status_response',
     'auth_whoami_response',
@@ -497,66 +497,72 @@ def analyze_lines(
     return lines
 
 
-def masked_profile(profile: AuthProfile) -> dict[str, object]:
-    '''Serialize a profile with every secret masked (never the full value).'''
+def masked_account(account: Account) -> dict[str, object]:
+    '''Serialize an account with every secret masked (never the full value).
+
+    ``id`` (the data-dir handle) and ``account_ref`` (a hashed exchange account
+    id) are non-secret and included so callers can see which book an account owns.
+    '''
     return {
-        'name': profile.name,
-        'exchange': profile.exchange,
-        'testnet': profile.testnet,
-        'api_key': _mask_secret(profile.api_key),
-        'api_secret': _mask_secret(profile.api_secret),
-        'password': _mask_secret(profile.password),
+        'name': account.name,
+        'id': account.id,
+        'account_ref': account.account_ref,
+        'exchange': account.exchange,
+        'testnet': account.testnet,
+        'api_key': _mask_secret(account.api_key),
+        'api_secret': _mask_secret(account.api_secret),
+        'password': _mask_secret(account.password),
     }
 
 
 def auth_list_response(
-    profiles: list[AuthProfile], active: str | None, generated_at: str
+    accounts: list[Account], active: str | None, generated_at: str
 ) -> dict[str, object]:
     '''Build the `auth list` JSON envelope (secrets masked).'''
-    body = {'active': active, 'profiles': [masked_profile(p) for p in profiles]}
+    body = {'active': active, 'accounts': [masked_account(p) for p in accounts]}
     return _local_envelope('auth list', generated_at, body)
 
 
 def auth_status_response(
-    profile: AuthProfile, active: str | None, valid: bool | None, generated_at: str
+    account: Account, active: str | None, valid: bool | None, generated_at: str
 ) -> dict[str, object]:
     '''Build the `auth status` JSON envelope; ``valid`` is true/false/null.'''
-    body = {'active': active, 'valid': valid, 'profile': masked_profile(profile)}
+    body = {'active': active, 'valid': valid, 'account': masked_account(account)}
     return _local_envelope('auth status', generated_at, body)
 
 
-def auth_whoami_response(profile: AuthProfile, generated_at: str) -> dict[str, object]:
+def auth_whoami_response(account: Account, generated_at: str) -> dict[str, object]:
     '''Build the `auth whoami` JSON envelope (secrets masked).'''
-    return _local_envelope('auth whoami', generated_at, {'profile': masked_profile(profile)})
+    return _local_envelope('auth whoami', generated_at, {'account': masked_account(account)})
 
 
-def auth_list_lines(profiles: list[AuthProfile], active: str | None) -> list[str]:
-    '''Render profiles as one line each, marking the active one.'''
-    return [_auth_profile_line(profile, active) for profile in profiles]
+def auth_list_lines(accounts: list[Account], active: str | None) -> list[str]:
+    '''Render accounts as one line each, marking the active one.'''
+    return [_auth_account_line(account, active) for account in accounts]
 
 
-def auth_status_lines(profile: AuthProfile, active: str | None, valid: bool | None) -> list[str]:
-    '''Render the active profile's status as human-readable lines.'''
+def auth_status_lines(account: Account, active: str | None, valid: bool | None) -> list[str]:
+    '''Render the active account's status as human-readable lines.'''
     state = {True: 'valid', False: 'invalid', None: 'unknown (offline)'}[valid]
-    active_mark = ' (active)' if profile.name == active else ''
+    active_mark = ' (active)' if account.name == active else ''
     return [
-        f'profile: {profile.name}{active_mark}',
-        f'exchange: {profile.exchange} ({_net(profile.testnet)})',
-        f'key: {_mask_secret(profile.api_key)}',
+        f'account: {account.name}{active_mark}',
+        f'exchange: {account.exchange} ({_net(account.testnet)})',
+        f'key: {_mask_secret(account.api_key)}',
         f'credentials: {state}',
     ]
 
 
-def auth_whoami_lines(profile: AuthProfile) -> list[str]:
-    '''Render the active profile identity as a single line.'''
-    return [f'{profile.name}  {profile.exchange} ({_net(profile.testnet)})']
+def auth_whoami_lines(account: Account) -> list[str]:
+    '''Render the active account identity as a single line.'''
+    return [f'{account.name}  {account.exchange} ({_net(account.testnet)})']
 
 
-def _auth_profile_line(profile: AuthProfile, active: str | None) -> str:
-    marker = '*' if profile.name == active else ' '
+def _auth_account_line(account: Account, active: str | None) -> str:
+    marker = '*' if account.name == active else ' '
     return (
-        f'{marker} {profile.name}  {profile.exchange}  {_net(profile.testnet)}  '
-        f'key={_mask_secret(profile.api_key)}'
+        f'{marker} {account.name}  {account.exchange}  {_net(account.testnet)}  '
+        f'key={_mask_secret(account.api_key)}'
     )
 
 

@@ -64,15 +64,15 @@ def _token(appdir, monkeypatch, capsys) -> str:
 # --- dry-run is the default and writes nothing ----------------------------
 
 
-def test_rebalance_dry_run_is_default_and_writes_nothing(appdir, monkeypatch, capsys):
+def test_rebalance_dry_run_is_default_and_writes_nothing(appdir, data_dir, monkeypatch, capsys):
     _setup(appdir, monkeypatch, cap=100000.0)
     payload = _json(['rebalance', '--json'], capsys)
     assert payload['dry_run'] is True
     assert payload['confirm_token']
     assert payload['pairs'][0]['proposed_order']['side'] == 'sell'
-    assert not (appdir / STATE_FILENAME).exists()
-    assert not (appdir / HISTORY_FILENAME).exists()
-    assert not (appdir / LEDGER_FILENAME).exists()
+    assert not (data_dir / STATE_FILENAME).exists()
+    assert not (data_dir / HISTORY_FILENAME).exists()
+    assert not (data_dir / LEDGER_FILENAME).exists()
 
 
 def test_plan_issues_confirm_token(appdir, monkeypatch, capsys):
@@ -101,7 +101,7 @@ def test_execute_with_stale_confirm_is_blocked(appdir, monkeypatch, capsys):
 # --- a valid confirm-token places exactly the planned order ---------------
 
 
-def test_execute_with_valid_confirm_places_and_persists(appdir, monkeypatch, capsys):
+def test_execute_with_valid_confirm_places_and_persists(appdir, data_dir, monkeypatch, capsys):
     exchange = _setup(appdir, monkeypatch, cap=100000.0)
     token = _token(appdir, monkeypatch, capsys)
     payload = _json(['rebalance', '--execute', '--confirm', token, '--json'], capsys)
@@ -109,9 +109,9 @@ def test_execute_with_valid_confirm_places_and_persists(appdir, monkeypatch, cap
     assert payload['results'][0]['status'] == 'submitted'
     assert len(exchange.created) == 1
     assert exchange.created[0]['clientOrderId'].startswith(CCB_PREFIX)
-    assert (appdir / STATE_FILENAME).is_file()
-    assert (appdir / HISTORY_FILENAME).is_file()
-    assert (appdir / LEDGER_FILENAME).is_file()
+    assert (data_dir / STATE_FILENAME).is_file()
+    assert (data_dir / HISTORY_FILENAME).is_file()
+    assert (data_dir / LEDGER_FILENAME).is_file()
 
 
 def test_execute_re_run_is_idempotent(appdir, monkeypatch, capsys):

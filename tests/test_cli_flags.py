@@ -40,13 +40,13 @@ def _run_json(argv, capsys) -> dict:
 # --- add / remove (local writes, no network) ------------------------------
 
 
-def test_flag_add_registers_and_persists(appdir, monkeypatch, capsys):
+def test_flag_add_registers_and_persists(appdir, data_dir, monkeypatch, capsys):
     monkeypatch.setattr(cli, '_exchange_store', _no_network)
     payload = _run_json(['flag', 'add', 'BTC/USDT', 'price', 'ge', '100000', '--json'], capsys)
     assert payload['command'] == 'flag add'
     assert payload['milestone']['id'] == 1
     assert payload['milestone']['expression'] == 'price >= 100000'
-    stored = FlagsStore(appdir / FLAGS_FILENAME).load()
+    stored = FlagsStore(data_dir / FLAGS_FILENAME).load()
     assert len(stored) == 1 and stored[0].symbol == 'BTC/USDT'
 
 
@@ -55,13 +55,13 @@ def test_flag_add_rejects_unknown_metric(appdir):
         cli.main(['flag', 'add', 'BTC/USDT', 'rsi', 'ge', '70'])
 
 
-def test_flag_remove_deletes_milestone(appdir, monkeypatch, capsys):
+def test_flag_remove_deletes_milestone(appdir, data_dir, monkeypatch, capsys):
     monkeypatch.setattr(cli, '_exchange_store', _no_network)
     cli.main(['flag', 'add', 'BTC/USDT', 'price', 'ge', '100000'])
     capsys.readouterr()
     payload = _run_json(['flag', 'remove', '1', '--json'], capsys)
     assert payload['removed']['id'] == 1
-    assert FlagsStore(appdir / FLAGS_FILENAME).load() == []
+    assert FlagsStore(data_dir / FLAGS_FILENAME).load() == []
 
 
 def test_flag_remove_unknown_id_errors(appdir, monkeypatch):

@@ -23,6 +23,8 @@ __all__ = [
     'FLAGS_FILENAME',
     'INDICATORS_FILENAME',
     'OHLCV_DIRNAME',
+    'ACCOUNTS_DIRNAME',
+    'DEFAULT_ACCOUNT_SCOPE',
     'KILL_SWITCH_FILENAME',
     'PROJECT_CONFIG_FILENAME',
     'CCB_PREFIX',
@@ -32,6 +34,7 @@ __all__ = [
     'ENV_EXCHANGE',
     'ENV_TESTNET',
     'ENV_CONFIG',
+    'ENV_ACCOUNT',
     'ENV_PROFILE',
     'ENV_AUTH_BACKEND',
     'AUTH_KEYRING_SERVICE',
@@ -87,7 +90,7 @@ APP_DIR_NAME = '.ccbalancer'
 # File names within the app directory (~/.ccbalancer).
 CONFIG_FILENAME = 'config.toml'
 ENV_FILENAME = '.env'
-# Auth profiles store (gh-style multi-account credentials). Holds profile metadata
+# Auth accounts store (gh-style multi-account credentials). Holds account metadata
 # and the active pointer; secrets live inline (file backend) or in the OS keyring.
 AUTH_FILENAME = 'auth.json'
 PORTFOLIO_FILENAME = 'portfolio.json'
@@ -105,6 +108,11 @@ FLAGS_FILENAME = 'flags.json'
 INDICATORS_FILENAME = 'indicators.toml'
 # Subdirectory under the app dir holding cached OHLCV candles for indicators.
 OHLCV_DIRNAME = 'ohlcv'
+# Per-account books live under <app_dir>/accounts/<account-id>/. Each account's
+# portfolio/state/ledger/decisions/flags are isolated by its stable id; the
+# no-account env-credential path uses the 'default' scope.
+ACCOUNTS_DIRNAME = 'accounts'
+DEFAULT_ACCOUNT_SCOPE = 'default'
 # Project-local config override found in the current working directory.
 PROJECT_CONFIG_FILENAME = 'ccbalancer.toml'
 # Presence of this file under the app dir blocks order placement (a manual abort
@@ -122,7 +130,9 @@ ENV_PASSPHRASE = 'CCB_PASSPHRASE'
 ENV_EXCHANGE = 'CCB_EXCHANGE'
 ENV_TESTNET = 'CCB_TESTNET'
 ENV_CONFIG = 'CCB_CONFIG'
-# Selects the active auth profile for one invocation (overridden by --profile).
+# Selects the active auth account for one invocation (overridden by --account).
+ENV_ACCOUNT = 'CCB_ACCOUNT'
+# Deprecated alias for ENV_ACCOUNT; still honored as a fallback for back-compat.
 ENV_PROFILE = 'CCB_PROFILE'
 # Forces the secret-storage backend: 'keyring' or 'file'.
 ENV_AUTH_BACKEND = 'CCB_AUTH_BACKEND'

@@ -6,6 +6,36 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-17
+
+Account-CLI overhaul: command-scoped flags, `--fields` projection, the `profile`→`account`
+rename, and per-account data isolation. `auth.json` and legacy root-level books migrate
+automatically on first run.
+
+### Added
+- I-6: `--fields a,b,c` projects a `--json` payload to the named top-level keys (agent token
+  savings); `--json` stays compact single-line.
+- I-7: `auth rename <old> <new>` renames an account, keeping its book and credentials.
+- I-8: per-account data directories — each account owns an isolated book under
+  `~/.ccbalancer/accounts/<id>/` (`portfolio`/`state`/`history`/`ledger`/`decision_log`/`flags`),
+  keyed by a stable immutable id so rename and key rotation never strand it. A best-effort
+  exchange `account_ref` (captured online at login) guards credential rotation: a renewed key
+  resolving to a different exchange account is refused (`--force` overrides). `auth list`/
+  `status`/`whoami` now surface the non-secret `id`/`account_ref`.
+
+### Fixed
+- F-5: switching accounts across venues no longer silently corrupts P&L. The per-account
+  `portfolio`/`state`/`ledger`/`decision_log`/`flags` were global, so `auth use <other>` then
+  `rebalance`/`performance` rebalanced/measured one account against another's balances and
+  interleaved cost-basis fills. Books are now isolated per account (I-8).
+
+### Changed
+- I-5: command-scoped flag parents — each subcommand's `--help` shows only the flags it uses;
+  `--profile`/`--pair` no longer leak onto `auth login`, `pair`, `config`, `analyze`, `indicator`.
+- I-7: the credential entity is renamed `profile` → `account` (`Account` model, `--account`,
+  `CCB_ACCOUNT`). `CCB_PROFILE` remains a deprecated fallback; existing `auth.json` files
+  migrate their `profiles` key to `accounts` on first read.
+
 ## [0.1.3] - 2026-07-16
 
 ### Fixed

@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import sys
+from dataclasses import replace
 
 from ccbalancer import __version__
 from ccbalancer import config as config_mod
@@ -54,8 +55,8 @@ from ccbalancer.managers.performance_manager import PerformanceManager, portfoli
 from ccbalancer.managers.portfolio_manager import PortfolioManager
 from ccbalancer.managers.rebalance_manager import RebalanceManager
 from ccbalancer.managers.regime_manager import RegimeManager
-from ccbalancer.models import AuthProfile, ExecutionResult, PairConfig
-from ccbalancer.stores.auth_store import AuthStore, backend_for, normalize_profile_name
+from ccbalancer.models import Account, ExecutionResult, PairConfig
+from ccbalancer.stores.auth_store import AuthStore, backend_for, normalize_account_name
 from ccbalancer.stores.decision_store import DecisionStore
 from ccbalancer.stores.exchange import ExchangeStore, requires_passphrase
 from ccbalancer.stores.flags_store import FlagsStore
@@ -96,8 +97,20 @@ rebalance is dry-run by default; pass --execute --confirm <token> (from plan) to
 
 
 def build_parser() -> argparse.ArgumentParser:
-    '''Build the top-level argument parser with all commands.'''
-    common = _common_flags()
+    '''Build the top-level argument parser with all commands.
+
+    Flags are grouped into small composable parent parsers so each command
+    inherits only the flags its handler actually reads: ``base`` (universal I/O)
+    is carried by every command; ``account`` (the auth-account selector) and
+    ``venue`` (exchange/sandbox overrides) only by commands that resolve
+    credentials or a venue; ``pair`` only by commands that filter by pair.
+    '''
+    base = _base_flags()
+    account = _account_flag()
+    venue = _venue_override_flags()
+    pair = _pair_flags()
+    trade = [base, account, venue, pair]   # full trading context
+    acct = [base, account]                 # per-account local commands (no venue/pair)
     parser = argparse.ArgumentParser(
         prog='ccbalancer',
         description='Agent-driven crypto portfolio rebalancer.',
@@ -105,25 +118,25 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest='command', metavar='<command>')
-    subparsers.add_parser('version', parents=[common], help='Print the ccbalancer version.')
-    subparsers.add_parser('status', parents=[common], help='Show current vs target allocation per pair.')
-    subparsers.add_parser('plan', parents=[common], help='Show rebalance decisions without executing.')
-    _add_execution_commands(subparsers, common)
-    _add_performance_command(subparsers, common)
-    _add_regime_command(subparsers, common)
-    _add_flag_command(subparsers, common)
-    _add_analyze_command(subparsers, common)
-    _add_indicator_command(subparsers, common)
-    _add_config_command(subparsers, common)
-    _add_auth_command(subparsers, common)
-    _add_pair_command(subparsers, common)
-    _add_audit_commands(subparsers, common)
+    subparsers.add_parser('version', parents=[base], help='Print the ccbalancer version.')
+    subparsers.add_parser('status', parents=trade, help='Show current vs target allocation per pair.')
+    subparsers.add_parser('plan', parents=trade, help='Show rebalance decisions without executing.')
+    _add_execution_commands(subparsers, trade)
+    _add_performance_command(subparsers, trade)
+    _add_regime_command(subparsers, trade)
+    _add_flag_command(subparsers, acct, trade)
+    _add_analyze_command(subparsers, [base, venue])
+    _add_indicator_command(subparsers, [base])
+    _add_config_command(subparsers, [base], [base, account, venue])
+    _add_auth_command(subparsers, [base], [base, account], [base, venue])
+    _add_pair_command(subparsers, acct)
+    _add_audit_commands(subparsers, [base, account, pair])
     return parser
 
 
-def _add_execution_commands(subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
+def _add_execution_commands(subparsers: argparse._SubParsersAction, trade: list[argparse.ArgumentParser]) -> None:
     rebalance = subparsers.add_parser(
-        'rebalance', parents=[common],
+        'rebalance', parents=trade,
         help='Place rebalance orders (dry-run by default; needs --execute --confirm).',
     )
     rebalance.add_argument(
@@ -132,16 +145,16 @@ def _add_execution_commands(subparsers: argparse._SubParsersAction, common: argp
     rebalance.add_argument(
         '--confirm', metavar='TOKEN', help='Confirm-token from a prior plan/dry-run (required with --execute).'
     )
-    subparsers.add_parser('orders', parents=[common], help='List open orders (this tool\'s are flagged).')
+    subparsers.add_parser('orders', parents=trade, help='List open orders (this tool\'s are flagged).')
     cancel = subparsers.add_parser(
-        'cancel', parents=[common], help='Cancel this tool\'s open orders (dry-run by default).'
+        'cancel', parents=trade, help='Cancel this tool\'s open orders (dry-run by default).'
     )
     cancel.add_argument('--execute', action='store_true', help='Actually cancel (default: dry-run).')
 
 
-def _add_performance_command(subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
+def _add_performance_command(subparsers: argparse._SubParsersAction, trade: list[argparse.ArgumentParser]) -> None:
     performance = subparsers.add_parser(
-        'performance', parents=[common],
+        'performance', parents=trade,
         help='Show cost-basis P&L and ROI per pair (--history for the ledger replay).',
     )
     performance.add_argument(
@@ -150,17 +163,23 @@ def _add_performance_command(subparsers: argparse._SubParsersAction, common: arg
     )
 
 
-def _add_regime_command(subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
+def _add_regime_command(subparsers: argparse._SubParsersAction, trade: list[argparse.ArgumentParser]) -> None:
     subparsers.add_parser(
-        'regime', parents=[common],
+        'regime', parents=trade,
         help='Flag whether the target ratio merits review (price-variance since target-set).',
     )
 
 
-def _add_flag_command(subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
+def _add_flag_command(
+    subparsers: argparse._SubParsersAction,
+    acct: list[argparse.ArgumentParser],
+    trade: list[argparse.ArgumentParser],
+) -> None:
+    # add/remove are local writes to the account's flags.json (no venue/pair);
+    # list evaluates milestones against live snapshots (full trading context).
     flag = subparsers.add_parser('flag', help='Register and evaluate milestones / watch-conditions.')
     sub = flag.add_subparsers(dest='flag_command', metavar='<action>')
-    add = sub.add_parser('add', parents=[common], help='Register a milestone watch-condition.')
+    add = sub.add_parser('add', parents=acct, help='Register a milestone watch-condition.')
     add.add_argument('symbol', help='Pair as BASE/QUOTE (e.g. BTC/USDT).')
     add.add_argument('metric', choices=MILESTONE_METRICS, help='Observed metric to watch.')
     add.add_argument(
@@ -169,20 +188,20 @@ def _add_flag_command(subparsers: argparse._SubParsersAction, common: argparse.A
     )
     add.add_argument('value', type=float, help='Threshold the metric is compared against.')
     add.add_argument('--note', help='Optional free-text note shown when the milestone is reported.')
-    sub.add_parser('list', parents=[common], help='List milestones and report hits against live snapshots.')
-    remove = sub.add_parser('remove', parents=[common], help='Remove a milestone by id.')
+    sub.add_parser('list', parents=trade, help='List milestones and report hits against live snapshots.')
+    remove = sub.add_parser('remove', parents=acct, help='Remove a milestone by id.')
     remove.add_argument('id', type=int, help='Milestone id (see `flag list`).')
 
 
-def _add_audit_commands(subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
+def _add_audit_commands(subparsers: argparse._SubParsersAction, audit: list[argparse.ArgumentParser]) -> None:
     subparsers.add_parser(
-        'decisions', parents=[common], help='Replay the local decision log (no network).'
+        'decisions', parents=audit, help='Replay the local decision log (no network).'
     )
     subparsers.add_parser(
-        'history', parents=[common], help='Replay the local rebalance history (no network).'
+        'history', parents=audit, help='Replay the local rebalance history (no network).'
     )
     subparsers.add_parser(
-        'export', parents=[common], help='Export local decision and history logs as JSON.'
+        'export', parents=audit, help='Export local decision and history logs as JSON.'
     )
 
 
@@ -201,30 +220,65 @@ def main(argv: list[str] | None = None) -> int:
         return int(_exit_code_for(exc))
 
 
-def _common_flags() -> argparse.ArgumentParser:
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument('--json', action='store_true', help='Emit compact JSON to stdout.')
-    common.add_argument('--config', metavar='PATH', help='Path to a config TOML file.')
-    common.add_argument('--profile', metavar='NAME', help='Use a named auth profile (overrides the active one).')
-    common.add_argument('--exchange', help='Override the configured/profile exchange (bybit|binance|okx).')
-    common.add_argument(
+def _base_flags() -> argparse.ArgumentParser:
+    '''Universal I/O flags carried by every command.'''
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--json', action='store_true', help='Emit compact JSON to stdout.')
+    parser.add_argument(
+        '--fields', metavar='LIST',
+        help='With --json, keep only these comma-separated top-level fields.',
+    )
+    parser.add_argument('--config', metavar='PATH', help='Path to a config TOML file.')
+    return parser
+
+
+def _account_flag() -> argparse.ArgumentParser:
+    '''The auth-account selector (only commands that resolve credentials/data).'''
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument(
+        '--account', metavar='NAME', help='Use a named auth account (overrides the active one).'
+    )
+    return parser
+
+
+def _venue_override_flags() -> argparse.ArgumentParser:
+    '''Exchange/sandbox overrides (only commands that resolve a venue).'''
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--exchange', help='Override the configured/account exchange (bybit|binance|okx).')
+    parser.add_argument(
         '--testnet', action=argparse.BooleanOptionalAction, default=None,
         help='Use (or disable) the exchange sandbox.',
     )
-    common.add_argument(
+    return parser
+
+
+def _pair_flags() -> argparse.ArgumentParser:
+    '''The repeatable pair filter (only commands that filter by pair).'''
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument(
         '--pair', action='append', metavar='SYMBOL', help='Restrict to a pair (repeatable).'
     )
-    return common
+    return parser
 
 
 def _load_config(args: argparse.Namespace) -> config_mod.AppConfig:
-    '''Resolve config, threading the global flags (incl. ``--profile``).'''
-    return config_mod.load_config(args.config, args.exchange, args.testnet, args.profile)
+    '''Resolve config from the args, reading each flag defensively.
+
+    Commands inherit only the flag parents they need, so ``--exchange``,
+    ``--testnet``, ``--account`` may be absent on a given command; ``getattr``
+    lets those fall through to the normal env/TOML/default resolution.
+    '''
+    return config_mod.load_config(
+        getattr(args, 'config', None),
+        getattr(args, 'exchange', None),
+        getattr(args, 'testnet', None),
+        getattr(args, 'account', None),
+    )
 
 
-def _add_analyze_command(subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
+def _add_analyze_command(subparsers: argparse._SubParsersAction, parents: list[argparse.ArgumentParser]) -> None:
     analyze = subparsers.add_parser(
-        'analyze', parents=[common], help='Show market indicators for a pair across timeframes.'
+        'analyze', parents=parents, help='Show market indicators for a pair across timeframes.'
     )
     analyze.add_argument('symbol', help='Pair as BASE/QUOTE (e.g. BTC/USDT).')
     analyze.add_argument(
@@ -237,11 +291,11 @@ def _add_analyze_command(subparsers: argparse._SubParsersAction, common: argpars
     )
 
 
-def _add_indicator_command(subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
+def _add_indicator_command(subparsers: argparse._SubParsersAction, parents: list[argparse.ArgumentParser]) -> None:
     parser = subparsers.add_parser('indicator', help='List or set indicator parameters.')
     sub = parser.add_subparsers(dest='indicator_command', metavar='<action>')
-    sub.add_parser('list', parents=[common], help='List indicators, parameters, defaults, and current values.')
-    set_node = sub.add_parser('set', parents=[common], help='Set indicator parameters in indicators.toml.')
+    sub.add_parser('list', parents=parents, help='List indicators, parameters, defaults, and current values.')
+    set_node = sub.add_parser('set', parents=parents, help='Set indicator parameters in indicators.toml.')
     set_node.add_argument('name', help='Indicator name (see `indicator list`).')
     set_node.add_argument(
         'assignments', nargs='+', metavar='KEY=VALUE',
@@ -249,32 +303,46 @@ def _add_indicator_command(subparsers: argparse._SubParsersAction, common: argpa
     )
 
 
-def _add_config_command(subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
+def _add_config_command(
+    subparsers: argparse._SubParsersAction,
+    base: list[argparse.ArgumentParser],
+    show_parents: list[argparse.ArgumentParser],
+) -> None:
     config_parser = subparsers.add_parser('config', help='Show or initialize configuration.')
     config_sub = config_parser.add_subparsers(dest='config_command', metavar='<action>')
-    config_sub.add_parser('show', parents=[common], help='Show resolved settings (secrets masked).')
-    config_sub.add_parser('init', parents=[common], help='Scaffold ~/.ccbalancer with templates.')
+    config_sub.add_parser('show', parents=show_parents, help='Show resolved settings (secrets masked).')
+    config_sub.add_parser('init', parents=base, help='Scaffold ~/.ccbalancer with templates.')
 
 
-def _add_auth_command(subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
-    auth = subparsers.add_parser('auth', help='Manage exchange credential profiles (gh-style).')
+def _add_auth_command(
+    subparsers: argparse._SubParsersAction,
+    base: list[argparse.ArgumentParser],
+    probe: list[argparse.ArgumentParser],
+    login_parents: list[argparse.ArgumentParser],
+) -> None:
+    # login sets a new account's venue (base + venue); status/whoami select a
+    # account to probe (base + account); the rest take a positional name (base).
+    auth = subparsers.add_parser('auth', help='Manage exchange credential accounts (gh-style).')
     sub = auth.add_subparsers(dest='auth_command', metavar='<action>')
-    _add_auth_login(sub, common)
-    logout = sub.add_parser('logout', parents=[common], help='Remove a profile (default: the active one).')
-    logout.add_argument('name', nargs='?', help='Profile to remove.')
-    sub.add_parser('list', parents=[common], help='List profiles (active marked, secrets masked).')
-    use = sub.add_parser('use', parents=[common], help='Switch the active profile.')
-    use.add_argument('name', help='Profile to make active.')
-    sub.add_parser('status', parents=[common], help='Show the active profile and a live credential check.')
-    sub.add_parser('whoami', parents=[common], help='Print the active profile name and exchange (local).')
+    _add_auth_login(sub, login_parents)
+    logout = sub.add_parser('logout', parents=base, help='Remove an account (default: the active one).')
+    logout.add_argument('name', nargs='?', help='Account to remove.')
+    sub.add_parser('list', parents=base, help='List accounts (active marked, secrets masked).')
+    use = sub.add_parser('use', parents=base, help='Switch the active account.')
+    use.add_argument('name', help='Account to make active.')
+    rename = sub.add_parser('rename', parents=base, help='Rename an account (keeps its book and credentials).')
+    rename.add_argument('old', help='Current account name.')
+    rename.add_argument('new', help='New account name.')
+    sub.add_parser('status', parents=probe, help='Show the active account and a live credential check.')
+    sub.add_parser('whoami', parents=probe, help='Print the active account name and exchange (local).')
 
 
-def _add_auth_login(sub: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
-    login = sub.add_parser('login', parents=[common], help='Add or update a credential profile.')
-    # The exchange/sandbox for the new profile reuse the inherited --exchange and
+def _add_auth_login(sub: argparse._SubParsersAction, login_parents: list[argparse.ArgumentParser]) -> None:
+    login = sub.add_parser('login', parents=login_parents, help='Add or update a credential account.')
+    # The exchange/sandbox for the new account reuse the inherited --exchange and
     # --testnet flags. When --testnet/--no-testnet is omitted the venue is resolved
     # from CCB_TESTNET / TOML / the default, like every other command.
-    login.add_argument('--name', help='Profile name slug (default: the exchange id).')
+    login.add_argument('--account', help='Account name slug (default: the exchange id).')
     login.add_argument('--key', help='API key (omit to be prompted when interactive).')
     login.add_argument('--secret', help='API secret (omit to be prompted when interactive).')
     login.add_argument('--passphrase', help='Passphrase for venues that require one (e.g. OKX).')
@@ -290,14 +358,18 @@ def _add_auth_login(sub: argparse._SubParsersAction, common: argparse.ArgumentPa
         '--no-verify', action='store_true', dest='no_verify',
         help='Skip the live fetch_balance credential check.',
     )
+    login.add_argument(
+        '--force', action='store_true',
+        help='Re-point the account even if the new key resolves to a different exchange account.',
+    )
 
 
-def _add_pair_command(subparsers: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
+def _add_pair_command(subparsers: argparse._SubParsersAction, acct: list[argparse.ArgumentParser]) -> None:
     pair_parser = subparsers.add_parser('pair', help='Manage portfolio pairs and targets.')
     pair_sub = pair_parser.add_subparsers(dest='pair_command', metavar='<action>')
-    pair_sub.add_parser('list', parents=[common], help='List configured pairs.')
+    pair_sub.add_parser('list', parents=acct, help='List configured pairs.')
     for action in ('add', 'set'):
-        node = pair_sub.add_parser(action, parents=[common], help=f'{action.capitalize()} a pair.')
+        node = pair_sub.add_parser(action, parents=acct, help=f'{action.capitalize()} a pair.')
         node.add_argument('symbol', help='Pair as BASE/QUOTE (e.g. BTC/USDT).')
         node.add_argument('--target', help='Target ratio volatile/stable, e.g. 80/20.')
         node.add_argument('--band', type=float, help='No-trade band percent.')
@@ -309,7 +381,7 @@ def _add_pair_command(subparsers: argparse._SubParsersAction, common: argparse.A
             '--target-set-price', type=float, dest='target_set_price',
             help='Price when the target ratio was set (stamps target-set time).',
         )
-    remove = pair_sub.add_parser('remove', parents=[common], help='Remove a pair.')
+    remove = pair_sub.add_parser('remove', parents=acct, help='Remove a pair.')
     remove.add_argument('symbol', help='Pair as BASE/QUOTE (e.g. BTC/USDT).')
 
 
@@ -466,7 +538,7 @@ def _cmd_cancel(args: argparse.Namespace) -> ExitCode:
     config = _load_config(args)
     config_mod.require_credentials(config)
     exchange = _exchange_store(config)
-    state = StateStore(config.app_dir / STATE_FILENAME, config.app_dir / HISTORY_FILENAME)
+    state = StateStore(config.data_dir / STATE_FILENAME, config.data_dir / HISTORY_FILENAME)
     manager = _build_execution_manager(config, exchange, state)
     symbols = [s.upper() for s in args.pair] if args.pair else None
     orders = manager.owned_open_orders(symbols)
@@ -483,9 +555,9 @@ def _execution_context(
     config: config_mod.AppConfig, requested: list[str] | None
 ) -> tuple[list[PairConfig], PortfolioManager, RebalanceManager, ExchangeStore, StateStore]:
     '''Resolve the pairs, managers, and stores the execution path needs.'''
-    portfolio = PortfolioStore(config.app_dir / PORTFOLIO_FILENAME)
+    portfolio = PortfolioStore(config.data_dir / PORTFOLIO_FILENAME)
     pairs = _selected_pairs(portfolio, requested)
-    state = StateStore(config.app_dir / STATE_FILENAME, config.app_dir / HISTORY_FILENAME)
+    state = StateStore(config.data_dir / STATE_FILENAME, config.data_dir / HISTORY_FILENAME)
     exchange = _exchange_store(config)
     return pairs, PortfolioManager(exchange, state), RebalanceManager.from_config(config), exchange, state
 
@@ -496,8 +568,8 @@ def _build_execution_manager(
     return ExecutionManager(
         exchange=exchange,
         state_store=state,
-        ledger_store=LedgerStore(config.app_dir / LEDGER_FILENAME),
-        decision_store=DecisionStore(config.app_dir / DECISION_LOG_FILENAME),
+        ledger_store=LedgerStore(config.data_dir / LEDGER_FILENAME),
+        decision_store=DecisionStore(config.data_dir / DECISION_LOG_FILENAME),
         exchange_id=config.exchange,
         testnet=config.testnet,
     )
@@ -522,9 +594,9 @@ def _cmd_performance(args: argparse.Namespace) -> ExitCode:
 
 def _cmd_performance_live(args: argparse.Namespace) -> ExitCode:
     config = _load_config(args)
-    portfolio = PortfolioStore(config.app_dir / PORTFOLIO_FILENAME)
+    portfolio = PortfolioStore(config.data_dir / PORTFOLIO_FILENAME)
     pairs = _selected_pairs(portfolio, args.pair)
-    ledger = LedgerStore(config.app_dir / LEDGER_FILENAME)
+    ledger = LedgerStore(config.data_dir / LEDGER_FILENAME)
     manager = PerformanceManager(ledger, _exchange_store(config))
     snapshots = manager.snapshots(pairs)
     totals = portfolio_totals(snapshots)
@@ -535,7 +607,7 @@ def _cmd_performance_live(args: argparse.Namespace) -> ExitCode:
 
 def _cmd_performance_history(args: argparse.Namespace) -> ExitCode:
     config = _load_config(args)
-    ledger = LedgerStore(config.app_dir / LEDGER_FILENAME)
+    ledger = LedgerStore(config.data_dir / LEDGER_FILENAME)
     manager = PerformanceManager(ledger)  # audit: no exchange access
     symbols = {symbol.upper() for symbol in args.pair} if args.pair else None
     records = manager.realized_history(symbols)
@@ -546,7 +618,7 @@ def _cmd_performance_history(args: argparse.Namespace) -> ExitCode:
 
 def _cmd_regime(args: argparse.Namespace) -> ExitCode:
     config = _load_config(args)
-    portfolio = PortfolioStore(config.app_dir / PORTFOLIO_FILENAME)
+    portfolio = PortfolioStore(config.data_dir / PORTFOLIO_FILENAME)
     pairs = _selected_pairs(portfolio, args.pair)
     portfolio_mgr = _portfolio_manager(config)
     snapshots = portfolio_mgr.snapshots(pairs)
@@ -568,7 +640,7 @@ def _cmd_flag(args: argparse.Namespace) -> ExitCode:
 
 def _cmd_flag_add(args: argparse.Namespace) -> ExitCode:
     config = _load_config(args)
-    store = FlagsStore(config.app_dir / FLAGS_FILENAME)
+    store = FlagsStore(config.data_dir / FLAGS_FILENAME)
     milestone = store.add(
         symbol=args.symbol.upper(), metric=args.metric, op=args.op,
         threshold=args.value, note=args.note, created_at=now_iso(),
@@ -580,7 +652,7 @@ def _cmd_flag_add(args: argparse.Namespace) -> ExitCode:
 
 def _cmd_flag_list(args: argparse.Namespace) -> ExitCode:
     config = _load_config(args)
-    store = FlagsStore(config.app_dir / FLAGS_FILENAME)
+    store = FlagsStore(config.data_dir / FLAGS_FILENAME)
     milestones = _filter_milestones(store.load(), args.pair)
     meta = _live_meta(config)
     context = _milestone_context(config, milestones, meta) if milestones else {}
@@ -592,7 +664,7 @@ def _cmd_flag_list(args: argparse.Namespace) -> ExitCode:
 
 def _cmd_flag_remove(args: argparse.Namespace) -> ExitCode:
     config = _load_config(args)
-    store = FlagsStore(config.app_dir / FLAGS_FILENAME)
+    store = FlagsStore(config.data_dir / FLAGS_FILENAME)
     removed = store.remove(args.id)
     payload = {'command': 'flag remove', 'removed': render.milestone_to_dict(removed)}
     _emit(args, payload, [f'Removed flag #{removed.id}: {removed.symbol} {removed.expression}'])
@@ -608,7 +680,7 @@ def _milestone_context(
     an unconfigured symbol are left out (evaluated as ``unknown`` downstream).
     '''
     referenced = {milestone.symbol for milestone in milestones}
-    portfolio = PortfolioStore(config.app_dir / PORTFOLIO_FILENAME)
+    portfolio = PortfolioStore(config.data_dir / PORTFOLIO_FILENAME)
     pairs = [pair for pair in portfolio.load() if pair.symbol in referenced]
     if not pairs:
         return {}
@@ -632,7 +704,7 @@ def _filter_milestones(milestones: list, requested: list[str] | None) -> list:
 
 def _portfolio_manager(config: config_mod.AppConfig) -> PortfolioManager:
     '''Build the read-side portfolio manager (exchange + state stores).'''
-    state = StateStore(config.app_dir / STATE_FILENAME, config.app_dir / HISTORY_FILENAME)
+    state = StateStore(config.data_dir / STATE_FILENAME, config.data_dir / HISTORY_FILENAME)
     return PortfolioManager(_exchange_store(config), state)
 
 
@@ -717,12 +789,12 @@ def _read_context(
 ) -> tuple[list[PairConfig], PortfolioManager, RebalanceManager, DecisionStore, dict[str, object]]:
     '''Resolve config and stores into the managers a read command needs.'''
     config = _load_config(args)
-    portfolio = PortfolioStore(config.app_dir / PORTFOLIO_FILENAME)
+    portfolio = PortfolioStore(config.data_dir / PORTFOLIO_FILENAME)
     pairs = _selected_pairs(portfolio, args.pair)
-    state = StateStore(config.app_dir / STATE_FILENAME, config.app_dir / HISTORY_FILENAME)
+    state = StateStore(config.data_dir / STATE_FILENAME, config.data_dir / HISTORY_FILENAME)
     portfolio_mgr = PortfolioManager(_exchange_store(config), state)
     rebalance_mgr = RebalanceManager.from_config(config)
-    decision_store = DecisionStore(config.app_dir / DECISION_LOG_FILENAME)
+    decision_store = DecisionStore(config.data_dir / DECISION_LOG_FILENAME)
     meta = {'exchange': config.exchange, 'testnet': config.testnet, 'generated_at': now_iso()}
     return pairs, portfolio_mgr, rebalance_mgr, decision_store, meta
 
@@ -777,66 +849,99 @@ def _cmd_auth(args: argparse.Namespace) -> ExitCode:
         'logout': _cmd_auth_logout,
         'list': _cmd_auth_list,
         'use': _cmd_auth_use,
+        'rename': _cmd_auth_rename,
         'status': _cmd_auth_status,
         'whoami': _cmd_auth_whoami,
     }
     handler = handlers.get(args.auth_command)
     if handler is None:
-        usage = 'Usage: auth login|logout|list|use|status|whoami'
-        _emit(args, {'error': 'specify: auth login|logout|list|use|status|whoami'}, [usage])
+        usage = 'Usage: auth login|logout|list|use|rename|status|whoami'
+        _emit(args, {'error': 'specify: auth login|logout|list|use|rename|status|whoami'}, [usage])
         return ExitCode.CONFIG_ERROR
     return handler(args)
 
 
 def _cmd_auth_login(args: argparse.Namespace) -> ExitCode:
     exchange = _login_exchange(args)
-    name = normalize_profile_name(args.name or exchange)
+    name = normalize_account_name(args.account or exchange)
     testnet = config_mod.resolve_login_testnet(args.testnet, args.config)
     key, secret, password = _collect_credentials(args, exchange)
-    profile = AuthProfile(name, exchange, testnet, key, secret, password)
+    account = Account(name, exchange, testnet, key, secret, password)
     store = _auth_store(args)
-    store.add_or_update(profile)
-    return _verify_and_emit_login(args, store, profile)
+    verified, ref = _verify_and_capture_ref(args, account)
+    account = _apply_identity(store, account, ref, args.force)
+    store.add_or_update(account)
+    _emit_login(args, account, store.active_name(), verified)
+    return ExitCode.EXCHANGE_ERROR if verified is False else ExitCode.OK
 
 
-def _verify_and_emit_login(args: argparse.Namespace, store: AuthStore, profile: AuthProfile) -> ExitCode:
-    active = store.active_name()
+def _verify_and_capture_ref(
+    args: argparse.Namespace, account: Account
+) -> tuple[bool | None, str | None]:
+    '''Verify credentials and capture the exchange account ref.
+
+    Returns ``(verified, ref)``: ``verified`` is True/False/None (None when
+    --no-verify); ``ref`` is the hashed exchange account id, or ``None`` when it
+    could not be captured (unverified, failed check, or unsupported venue).
+    '''
     if args.no_verify:
-        _emit_login(args, profile, active, None)
-        return ExitCode.OK
+        return None, None
+    exchange = _account_exchange_store(account)
     try:
-        _verify_profile(profile)
+        exchange.check_credentials()
+        exchange.fetch_balance()
     except ExchangeError as exc:
         _logger.warning('credential check failed: %s', exc)
-        _emit_login(args, profile, active, False)
-        return ExitCode.EXCHANGE_ERROR
-    _emit_login(args, profile, active, True)
-    return ExitCode.OK
+        return False, None
+    return True, exchange.account_ref()
+
+
+def _apply_identity(store: AuthStore, account: Account, ref: str | None, force: bool) -> Account:
+    '''Assign the account's stable id and ref, guarding credential rotation.
+
+    Re-logging into an existing account name with a key that resolves to a
+    *different* exchange account is refused (it would strand the account's book)
+    unless ``force``. When the ref is uncaptured, the stored ref is preserved and
+    the guard is skipped (nothing to compare against).
+
+    Raises:
+        AuthError: On a refused credential rotation.
+    '''
+    existing = store.get(account.name)
+    if existing is None:
+        return replace(account, account_ref=ref)
+    if ref and existing.account_ref and ref != existing.account_ref and not force:
+        raise AuthError(
+            f'Account {account.name!r} already belongs to a different exchange account '
+            '(the new credentials resolve to a different identity). Pass --force to '
+            're-point it, or log in under a different --account name.'
+        )
+    return replace(account, id=existing.id, account_ref=ref or existing.account_ref)
 
 
 def _emit_login(
-    args: argparse.Namespace, profile: AuthProfile, active: str | None, verified: bool | None
+    args: argparse.Namespace, account: Account, active: str | None, verified: bool | None
 ) -> None:
     payload = {
         'command': 'auth login',
-        'profile': render.masked_profile(profile),
+        'account': render.masked_account(account),
         'active': active,
         'verified': verified,
     }
     status = {True: 'verified', False: 'saved (credential check failed)', None: 'saved (unverified)'}
-    lines = [f'Logged in {profile.name} ({profile.exchange}): {status[verified]}']
+    lines = [f'Logged in {account.name} ({account.exchange}): {status[verified]}']
     if verified is False:
-        lines.extend(_login_failure_hints(profile))
+        lines.extend(_login_failure_hints(account))
     _emit(args, payload, lines)
 
 
-def _login_failure_hints(profile: AuthProfile) -> list[str]:
+def _login_failure_hints(account: Account) -> list[str]:
     '''Explain a failed credential check: likely testnet/passphrase misconfiguration.'''
     hints = []
-    if profile.testnet:
-        hints.append('hint: profile targets testnet; live keys need --no-testnet')
-    if not profile.password and requires_passphrase(profile.exchange):
-        hints.append(f'hint: {profile.exchange} requires --passphrase')
+    if account.testnet:
+        hints.append('hint: account targets testnet; live keys need --no-testnet')
+    if not account.password and requires_passphrase(account.exchange):
+        hints.append(f'hint: {account.exchange} requires --passphrase')
     return hints
 
 
@@ -844,55 +949,64 @@ def _cmd_auth_logout(args: argparse.Namespace) -> ExitCode:
     store = _auth_store(args)
     name = args.name or store.active_name()
     if name is None:
-        _emit(args, {'error': 'no profile to remove'}, ['No active profile to remove.'])
+        _emit(args, {'error': 'no account to remove'}, ['No active account to remove.'])
         return ExitCode.CONFIG_ERROR
     store.remove(name)
     active = store.active_name()
-    removed = normalize_profile_name(name)
+    removed = normalize_account_name(name)
     _emit(args, {'command': 'auth logout', 'removed': removed, 'active': active},
-          [f'Removed {removed}', f'Active profile: {active or "(none)"}'])
+          [f'Removed {removed}', f'Active account: {active or "(none)"}'])
     return ExitCode.OK
 
 
 def _cmd_auth_list(args: argparse.Namespace) -> ExitCode:
     store = _auth_store(args)
-    profiles = store.load()
+    accounts = store.load()
     active = store.active_name()
-    payload = render.auth_list_response(profiles, active, now_iso())
-    empty = ['(no profiles; run `ccbalancer auth login`)']
-    _emit(args, payload, render.auth_list_lines(profiles, active) or empty)
+    payload = render.auth_list_response(accounts, active, now_iso())
+    empty = ['(no accounts; run `ccbalancer auth login`)']
+    _emit(args, payload, render.auth_list_lines(accounts, active) or empty)
     return ExitCode.OK
 
 
 def _cmd_auth_use(args: argparse.Namespace) -> ExitCode:
     store = _auth_store(args)
     store.set_active(args.name)
-    active = normalize_profile_name(args.name)
-    _emit(args, {'command': 'auth use', 'active': active}, [f'Active profile: {active}'])
+    active = normalize_account_name(args.name)
+    _emit(args, {'command': 'auth use', 'active': active}, [f'Active account: {active}'])
+    return ExitCode.OK
+
+
+def _cmd_auth_rename(args: argparse.Namespace) -> ExitCode:
+    store = _auth_store(args)
+    new_name = store.rename(args.old, args.new)
+    old_name = normalize_account_name(args.old)
+    _emit(args, {'command': 'auth rename', 'account': new_name, 'active': store.active_name()},
+          [f'Renamed {old_name} -> {new_name}'])
     return ExitCode.OK
 
 
 def _cmd_auth_status(args: argparse.Namespace) -> ExitCode:
     store = _auth_store(args)
-    profile = _selected_profile(store, args.profile)
-    if profile is None:
+    account = _selected_account(store, args.account)
+    if account is None:
         _emit(args, {'command': 'auth status', 'active': None},
-              ['No active profile; run `ccbalancer auth login`.'])
+              ['No active account; run `ccbalancer auth login`.'])
         return ExitCode.OK
-    valid = _probe_profile(profile)
+    valid = _probe_account(account)
     active = store.active_name()
-    payload = render.auth_status_response(profile, active, valid, now_iso())
-    _emit(args, payload, render.auth_status_lines(profile, active, valid))
+    payload = render.auth_status_response(account, active, valid, now_iso())
+    _emit(args, payload, render.auth_status_lines(account, active, valid))
     return ExitCode.OK
 
 
 def _cmd_auth_whoami(args: argparse.Namespace) -> ExitCode:
     store = _auth_store(args)
-    profile = _selected_profile(store, args.profile)
-    if profile is None:
-        _emit(args, {'command': 'auth whoami', 'profile': None}, ['No active profile.'])
+    account = _selected_account(store, args.account)
+    if account is None:
+        _emit(args, {'command': 'auth whoami', 'account': None}, ['No active account.'])
         return ExitCode.OK
-    _emit(args, render.auth_whoami_response(profile, now_iso()), render.auth_whoami_lines(profile))
+    _emit(args, render.auth_whoami_response(account, now_iso()), render.auth_whoami_lines(account))
     return ExitCode.OK
 
 
@@ -909,14 +1023,14 @@ def _backend_pref(args: argparse.Namespace) -> str | None:
     return 'keyring' if keyring else 'file'
 
 
-def _selected_profile(store: AuthStore, profile_flag: str | None) -> AuthProfile | None:
-    name = profile_flag or os.getenv(c.ENV_PROFILE) or store.active_name()
+def _selected_account(store: AuthStore, account_flag: str | None) -> Account | None:
+    name = account_flag or os.getenv(c.ENV_ACCOUNT) or os.getenv(c.ENV_PROFILE) or store.active_name()
     if name is None:
         return None
-    profile = store.get(name)
-    if profile is None:
-        raise AuthError(f'Profile {name!r} not found; run `ccbalancer auth list`')
-    return profile
+    account = store.get(name)
+    if account is None:
+        raise AuthError(f'Account {name!r} not found; run `ccbalancer auth list`')
+    return account
 
 
 def _login_exchange(args: argparse.Namespace) -> str:
@@ -960,16 +1074,9 @@ def _non_interactive_error(
     )
 
 
-def _verify_profile(profile: AuthProfile) -> None:
-    '''Prove the credentials work: local check then a live balance fetch.'''
-    store = _profile_exchange_store(profile)
-    store.check_credentials()
-    store.fetch_balance()
-
-
-def _probe_profile(profile: AuthProfile) -> bool | None:
+def _probe_account(account: Account) -> bool | None:
     '''Three-state credential probe: True valid, False missing, None unreachable.'''
-    store = _profile_exchange_store(profile)
+    store = _account_exchange_store(account)
     try:
         store.check_credentials()
     except ExchangeError:
@@ -981,14 +1088,14 @@ def _probe_profile(profile: AuthProfile) -> bool | None:
     return True
 
 
-def _profile_exchange_store(profile: AuthProfile) -> ExchangeStore:
-    '''Build an exchange store for a profile (seam for tests to inject a fake).'''
+def _account_exchange_store(account: Account) -> ExchangeStore:
+    '''Build an exchange store for an account (seam for tests to inject a fake).'''
     return ExchangeStore(
-        exchange_id=profile.exchange,
-        testnet=profile.testnet,
-        api_key=profile.api_key,
-        api_secret=profile.api_secret,
-        password=profile.password,
+        exchange_id=account.exchange,
+        testnet=account.testnet,
+        api_key=account.api_key,
+        api_secret=account.api_secret,
+        password=account.password,
     )
 
 
@@ -1043,7 +1150,7 @@ def _cmd_pair_remove(args: argparse.Namespace) -> ExitCode:
 
 def _cmd_decisions(args: argparse.Namespace) -> ExitCode:
     config = _load_config(args)
-    store = DecisionStore(config.app_dir / DECISION_LOG_FILENAME)
+    store = DecisionStore(config.data_dir / DECISION_LOG_FILENAME)
     records = _filter_by_pair(store.load(), args.pair)
     payload = render.decisions_response(records, now_iso())
     _emit(args, payload, render.decisions_lines(records) or ['(no decisions logged)'])
@@ -1052,7 +1159,7 @@ def _cmd_decisions(args: argparse.Namespace) -> ExitCode:
 
 def _cmd_history(args: argparse.Namespace) -> ExitCode:
     config = _load_config(args)
-    state = StateStore(config.app_dir / STATE_FILENAME, config.app_dir / HISTORY_FILENAME)
+    state = StateStore(config.data_dir / STATE_FILENAME, config.data_dir / HISTORY_FILENAME)
     events = _filter_by_pair(state.load_history(), args.pair)
     payload = render.history_response(events, now_iso())
     _emit(args, payload, render.history_lines(events) or ['(no history logged)'])
@@ -1061,8 +1168,8 @@ def _cmd_history(args: argparse.Namespace) -> ExitCode:
 
 def _cmd_export(args: argparse.Namespace) -> ExitCode:
     config = _load_config(args)
-    decisions = DecisionStore(config.app_dir / DECISION_LOG_FILENAME).load()
-    state = StateStore(config.app_dir / STATE_FILENAME, config.app_dir / HISTORY_FILENAME)
+    decisions = DecisionStore(config.data_dir / DECISION_LOG_FILENAME).load()
+    state = StateStore(config.data_dir / STATE_FILENAME, config.data_dir / HISTORY_FILENAME)
     payload = render.export_response(decisions, state.load_history(), now_iso())
     # Export is a data bundle: always JSON, even without --json.
     print(json.dumps(payload, separators=(',', ':'), default=str))
@@ -1081,7 +1188,7 @@ def _filter_by_pair(
 
 def _portfolio_store(args: argparse.Namespace) -> tuple[PortfolioStore, config_mod.AppConfig]:
     config = _load_config(args)
-    return PortfolioStore(config.app_dir / PORTFOLIO_FILENAME), config
+    return PortfolioStore(config.data_dir / PORTFOLIO_FILENAME), config
 
 
 def _build_pair(args: argparse.Namespace, defaults: Defaults) -> PairConfig:
@@ -1145,10 +1252,23 @@ def _format_pair(pair: PairConfig) -> str:
 
 def _emit(args: argparse.Namespace, payload: dict[str, object], text_lines: list[str]) -> None:
     if getattr(args, 'json', False):
-        print(json.dumps(payload, separators=(',', ':'), default=str))
+        print(json.dumps(_project_fields(args, payload), separators=(',', ':'), default=str))
     else:
         for line in text_lines:
             print(line)
+
+
+def _project_fields(args: argparse.Namespace, payload: dict[str, object]) -> dict[str, object]:
+    '''Restrict a JSON payload to the ``--fields`` top-level keys, if given.
+
+    Absent or unknown keys are simply omitted; ``--fields`` with no ``--json``
+    has no effect (text output ignores it).
+    '''
+    raw = getattr(args, 'fields', None)
+    if not raw:
+        return payload
+    wanted = [field.strip() for field in raw.split(',') if field.strip()]
+    return {key: payload[key] for key in wanted if key in payload}
 
 
 def _format_summary(summary: dict[str, object]) -> list[str]:
