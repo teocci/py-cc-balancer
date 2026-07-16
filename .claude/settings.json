@@ -28,7 +28,17 @@
       "WebSearch",
       "WebFetch(domain:github.com)",
       "Read(//c/Users/teocci/.ccbalancer/**)",
-      "Edit(/.claude/skills/phase-complete/**)"
+      "Edit(/.claude/skills/phase-complete/**)",
+      "Bash(.venv/Scripts/python -m ccbalancer version)",
+      "Bash(sed:*)",
+      "Bash(mkdir:*)",
+      "Bash(mv:*)",
+      "Bash(find:*)",
+      "Bash(git check-ignore:*)",
+      "Read(//d/Teocci/**)",
+      "Bash(.venv/Scripts/python -c ' *)",
+      "Bash(.venv/Scripts/python .claude/skills/ccxt-changelog-distill/scripts/distill.py --self-check)",
+      "Bash(git add *)"
     ],
     "additionalDirectories": [
       "d:\\teocci\\code\\python\\py-cc-balancer\\dist\\ccbalancer",

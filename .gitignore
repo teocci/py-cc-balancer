@@ -114,3 +114,9 @@ wb_cli_implementation_plan_wrong.md
 bugs/
 reports/
 reverse/
+
+# ccxt raw release notes — a 1.5MB/390K-token dump, and a context bomb inside the
+# directory agents glob. Distilled into docs/cctx/19-changelog-impact.md by the
+# ccxt-changelog-distill skill; regenerate with `gh api repos/ccxt/ccxt/releases
+# --paginate`. Never commit the raw form.
+docs/cctx/CHANGELOG.md

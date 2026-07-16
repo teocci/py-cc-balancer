@@ -82,16 +82,9 @@ Major exchanges have the `.features` property available, where you can see what 
 
 *this feature is currently a work in progress and might be incomplete, feel free to report any issues you find in it*
 
-
-
 ### Overriding Exchange Properties Upon Instantiation
 
 Most of exchange properties as well as specific options can be overrided upon exchange class instantiation or afterwards, like shown below:
-
-
-
-
-
 
 ```python
 exchange = ccxt.binance ({
@@ -110,9 +103,6 @@ exchange.options['adjustForTimeDifference'] = False
 ### Overriding Exchange Methods
 
 In all CCXT-supported languages, you can override instance methods during runtime:
-
-
-
 
 ```python
 ex = ccxt.binance()

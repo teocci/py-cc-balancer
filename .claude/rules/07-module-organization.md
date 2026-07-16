@@ -3,7 +3,7 @@
 ## Rules
 
 - One module per file; no monolithic files
-- Target 300-500 lines per file; max ~700 (excluding tests)
+- Target 300-500 lines per file; max ~900 (excluding tests)
 - If exceeding limit, split by responsibility
 
 ## Module Contents Order

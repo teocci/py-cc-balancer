@@ -2,8 +2,9 @@
 
 > **Purpose**: Help AI agents find the right document chunk in **one hop** without scanning every file.
 > **Use**: Match the user's intent / API symbol / task keyword against the tables below, then load only the linked file.
-> **Source**: [ccxt/wiki/Manual.md](https://github.com/ccxt/ccxt/blob/master/wiki/Manual.md) — Python-only, language noise removed.
-> **Stats**: 18 chunks · 4,379 lines · ~62K tokens total · single-file fallback at [`_ccxt-manual-python-only.md`](./_ccxt-manual-python-only.md) (~62K tokens).
+> **Source**: chunks `01`-`18` from [ccxt/wiki/Manual.md](https://github.com/ccxt/ccxt/blob/master/wiki/Manual.md) — Python-only, language noise removed. Chunk `19` from the [Releases API](https://github.com/ccxt/ccxt/releases), distilled to this project's ccxt surface.
+> **Version**: chunks `01`-`18` describe ccxt **at our pinned `ccxt==4.4.94`**. Anything upstream changed since then lives in [`19-changelog-impact.md`](./19-changelog-impact.md).
+> **Stats**: 19 chunks · 4,861 lines · ~68K tokens total.
 
 ---
 
@@ -11,6 +12,8 @@
 
 | If the user is asking… | Go to |
 |---|---|
+| "Did ccxt change since our pinned version / is this manual stale?" | [`19-changelog-impact.md`](./19-changelog-impact.md) |
+| "We're bumping the ccxt pin — what breaks?" | [`19-changelog-impact.md`](./19-changelog-impact.md) |
 | "How do I install / what is ccxt / what's the architecture?" | [`01-overview.md`](./01-overview.md) |
 | "How do I create an exchange instance / set API keys / use testnet?" | [`02-exchanges.md`](./02-exchanges.md) |
 | "What exchanges are supported?" | [`02-exchanges.md`](./02-exchanges.md) (compact ID list at top) |
@@ -239,26 +242,25 @@ Scan for keywords the user might mention. File numbers in parens.
 
 | # | File | Lines | ~Tokens | Primary Topic |
 |---|---|---|---|---|
-| 01 | [`01-overview.md`](./01-overview.md) | 31 | 505 | Architecture, social links |
-| 02 | [`02-exchanges.md`](./02-exchanges.md) | 317 | 5,031 | Instantiation, properties, rate limit, testnet, 105 exchange IDs |
-| 03 | [`03-markets-intro-to-symbols-and-market-ids.md`](./03-markets-intro-to-symbols-and-market-ids.md) | 448 | 7,917 | Currency/network/market structure, precision, loading, symbols, naming |
-| 04 | [`04-markets-market-cache-force-reload.md`](./04-markets-market-cache-force-reload.md) | 22 | 291 | Sharing markets between instances, force reload |
-| 05 | [`05-implicit-api.md`](./05-implicit-api.md) | 177 | 3,179 | Implicit REST methods, sync vs async, params, naming conventions |
-| 06 | [`06-unified-api.md`](./06-unified-api.md) | 252 | 3,339 | Overriding unified params, pagination (date/id/cursor) |
-| 07 | [`07-public-api-intro-to-exchange-status.md`](./07-public-api-intro-to-exchange-status.md) | 413 | 7,004 | Order book, tickers, OHLCV, public trades, time, status |
-| 08 | [`08-public-api-borrow-rates-to-long-short-ratio.md`](./08-public-api-borrow-rates-to-long-short-ratio.md) | 435 | 3,455 | Borrow/funding/leverage tiers/OI/volatility/greeks/options/LSR |
-| 09 | [`09-public-api-auto-de-leverage.md`](./09-public-api-auto-de-leverage.md) | 19 | 111 | ADL structure |
-| 10 | [`10-private-api-intro-to-account-balance.md`](./10-private-api-intro-to-account-balance.md) | 211 | 3,043 | Auth, API keys, nonce override, accounts, balance |
-| 11 | [`11-private-api-intro-to-order-structure.md`](./11-private-api-intro-to-order-structure.md) | 149 | 2,992 | Querying orders, order structure |
-| 12 | [`12-private-api-placing-orders-to-editing-orders.md`](./12-private-api-placing-orders-to-editing-orders.md) | 431 | 6,833 | Placing orders (limit/market/stop/TP/SL), editing orders |
-| 13 | [`13-private-api-canceling-orders.md`](./13-private-api-canceling-orders.md) | 62 | 541 | Cancel order, cancel all, cancel batch |
-| 14 | [`14-private-api-my-trades-to-deposit-addresses.md`](./14-private-api-my-trades-to-deposit-addresses.md) | 397 | 5,229 | My trades, ledger, deposits, withdrawals, deposit addresses |
-| 15 | [`15-private-api-transfers-to-leverage.md`](./15-private-api-transfers-to-leverage.md) | 430 | 4,274 | Transfers, fees, borrow interest, margin, leverage |
-| 16 | [`16-private-api-contract-trading-to-string-math.md`](./16-private-api-contract-trading-to-string-math.md) | 352 | 4,134 | Contract trading, positions, proxy, string math |
-| 17 | [`17-error-handling.md`](./17-error-handling.md) | 187 | 2,963 | Retry mechanism, exception hierarchy |
-| 18 | [`18-troubleshooting.md`](./18-troubleshooting.md) | 46 | 1,079 | Debugging, verbose mode, FAQ links |
-| | [`README.md`](./README.md) | 170 | — | Chunk list with sub-sections |
-| | [`_ccxt-manual-python-only.md`](./_ccxt-manual-python-only.md) | 4,431 | ~62,000 | Full single-file Python-only manual (fallback) |
+| 01 | [`01-overview.md`](./01-overview.md) | 36 | 505 | Architecture, social links |
+| 02 | [`02-exchanges.md`](./02-exchanges.md) | 318 | 5,031 | Instantiation, properties, rate limit, testnet, 105 exchange IDs |
+| 03 | [`03-markets-intro-to-symbols-and-market-ids.md`](./03-markets-intro-to-symbols-and-market-ids.md) | 470 | 7,917 | Currency/network/market structure, precision, loading, symbols, naming |
+| 04 | [`04-markets-market-cache-force-reload.md`](./04-markets-market-cache-force-reload.md) | 30 | 291 | Sharing markets between instances, force reload |
+| 05 | [`05-implicit-api.md`](./05-implicit-api.md) | 183 | 3,179 | Implicit REST methods, sync vs async, params, naming conventions |
+| 06 | [`06-unified-api.md`](./06-unified-api.md) | 261 | 3,339 | Overriding unified params, pagination (date/id/cursor) |
+| 07 | [`07-public-api-intro-to-exchange-status.md`](./07-public-api-intro-to-exchange-status.md) | 438 | 7,004 | Order book, tickers, OHLCV, public trades, time, status |
+| 08 | [`08-public-api-borrow-rates-to-long-short-ratio.md`](./08-public-api-borrow-rates-to-long-short-ratio.md) | 459 | 3,455 | Borrow/funding/leverage tiers/OI/volatility/greeks/options/LSR |
+| 09 | [`09-public-api-auto-de-leverage.md`](./09-public-api-auto-de-leverage.md) | 26 | 111 | ADL structure |
+| 10 | [`10-private-api-intro-to-account-balance.md`](./10-private-api-intro-to-account-balance.md) | 227 | 3,043 | Auth, API keys, nonce override, accounts, balance |
+| 11 | [`11-private-api-intro-to-order-structure.md`](./11-private-api-intro-to-order-structure.md) | 164 | 2,992 | Querying orders, order structure |
+| 12 | [`12-private-api-placing-orders-to-editing-orders.md`](./12-private-api-placing-orders-to-editing-orders.md) | 451 | 6,833 | Placing orders (limit/market/stop/TP/SL), editing orders |
+| 13 | [`13-private-api-canceling-orders.md`](./13-private-api-canceling-orders.md) | 69 | 541 | Cancel order, cancel all, cancel batch |
+| 14 | [`14-private-api-my-trades-to-deposit-addresses.md`](./14-private-api-my-trades-to-deposit-addresses.md) | 419 | 5,229 | My trades, ledger, deposits, withdrawals, deposit addresses |
+| 15 | [`15-private-api-transfers-to-leverage.md`](./15-private-api-transfers-to-leverage.md) | 450 | 4,274 | Transfers, fees, borrow interest, margin, leverage |
+| 16 | [`16-private-api-contract-trading-to-string-math.md`](./16-private-api-contract-trading-to-string-math.md) | 367 | 4,134 | Contract trading, positions, proxy, string math |
+| 17 | [`17-error-handling.md`](./17-error-handling.md) | 194 | 2,963 | Retry mechanism, exception hierarchy |
+| 18 | [`18-troubleshooting.md`](./18-troubleshooting.md) | 51 | 1,079 | Debugging, verbose mode, FAQ links |
+| 19 | [`19-changelog-impact.md`](./19-changelog-impact.md) | 248 | ~4,800 | Upstream changes above the pinned ccxt version, judged against our surface; breaking-change ledger |
 
 ---
 
@@ -269,11 +271,13 @@ Scan for keywords the user might mention. File numbers in parens.
 1. **Tiny budget (<8K tokens)**: Load this `INDEX.md` (~3K tokens) only. Pick the single most relevant chunk and load just that one.
 2. **Small budget (8–32K tokens)**: Load `INDEX.md` + 2–4 most relevant chunks for the task.
 3. **Medium budget (32–128K tokens)**: Load `INDEX.md` + the whole topic cluster (e.g. all `0X-private-api-*.md` files for a trading task).
-4. **Large budget (>128K tokens)**: Skip chunking — load [`_ccxt-manual-python-only.md`](./_ccxt-manual-python-only.md) (~62K tokens) for full cross-section context.
+4. **Large budget (>128K tokens)**: Load `INDEX.md` + every chunk `01`-`19` (~68K tokens) for full cross-section context.
 
 **Recommended agent workflow:**
 
 ```
+0. If the task involves bumping the ccxt pin, or a chunk contradicts
+   observed behavior, read 19-changelog-impact.md first.
 1. Read INDEX.md (this file).
 2. Match user query against:
    a. "Fast Start" table (intent-based)
@@ -295,7 +299,8 @@ Scan for keywords the user might mention. File numbers in parens.
 - **Per-exchange quirks** — see the [Exchange Wiki](https://github.com/ccxt/ccxt/wiki/Exchanges) for exchange-specific notes
 - **Examples repository** — https://github.com/ccxt/ccxt/tree/master/examples
 - **FAQ** — https://github.com/ccxt/ccxt/wiki/FAQ
+- **Changes newer than our pinned `ccxt==4.4.94`** — chunks `01`-`18` describe ccxt *at the pin*. Upstream deltas above it are judged in [`19-changelog-impact.md`](./19-changelog-impact.md); that file is an impact assessment scoped to our surface, not a complete changelog.
 
 ---
 
-*Generated from [`Manual.md`](https://github.com/ccxt/ccxt/blob/master/wiki/Manual.md) at commit `master`. Re-run the splitter (`/home/z/my-project/scripts/split_manual.py`) to refresh when the upstream changes.*
+*Chunks `01`-`18` generated from [`Manual.md`](https://github.com/ccxt/ccxt/blob/master/wiki/Manual.md) at commit `master`. Chunk `19` is regenerated by the `ccxt-changelog-distill` skill — run it after bumping the ccxt pin.*

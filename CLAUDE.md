@@ -47,5 +47,8 @@ portable zips to a GitHub Release). The spec collects `ccxt` + `keyring` (incl. 
 
 - `src/ccbalancer/` — package (`config`, `constants`, `exceptions`, `enums/`, `models/`, `stores/`, `managers/`, `utils/`, `cli`).
 - `tests/` — pytest suites (mock the exchange; never hit the network).
-- `docs/` — `DESIGN.md`, `PROGRESS.md`, `phases/`, `IMPROVEMENTS.md`, `FIXES.md`, `RELEASE.md`.
-- User data at `~/.ccbalancer/`: `config.toml`, `.env`, `portfolio.json`, `state.json`, `history.jsonl`.
+- `docs/` — `DESIGN.md`, `PROGRESS.md`, `phases/`, `fixes/`, `cctx/`, `IMPROVEMENTS.md`, `FIXES.md`, `RELEASE.md`.
+- User data at `~/.ccbalancer/` — `config.toml`, `portfolio.json`, `state.json`, append-only `*.jsonl`
+  logs, the `ohlcv/` cache, the `STOP` kill-switch. A project-local `ccbalancer.toml` in the CWD takes
+  precedence over the base-dir config. Every filename and `CCB_*` env-var name is defined in
+  `constants.py` — the single source of truth; don't restate them elsewhere (rule `14-file-locations`).
