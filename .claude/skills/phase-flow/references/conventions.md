@@ -169,9 +169,11 @@ version and cut a tag.
   (`<PLAN>`, detail stubs) ride the release commit — `phase-complete` sweeps them via `git add -A`.
 - **Chore track** → a plain **Conventional Commit**, with **no** version bump, **no** `<CHANGELOG>`
   entry, **no** `<RELEASE_INDEX>` row, **no** tag, **no** phase. Use for developer tooling and
-  process: skill/rule/settings files, meta or planning docs, CI/build tweaks not tied to a release,
-  and refactors with no user-visible effect. Commit types: `chore:` / `docs:` / `ci:` / `build:` /
-  `refactor:` / `test:`. Path hints: skill/config dirs → `chore(...)`; meta docs → `docs`.
+  process. **As a rule, everything under `.claude/` is chore-track** — skills, `rules/`,
+  `settings.json`, hooks, commands — because it is agent/dev configuration, never shipped product.
+  Also chore-track: meta or planning docs, CI/build tweaks not tied to a release, and refactors
+  with no user-visible effect. Commit types: `chore:` / `docs:` / `ci:` / `build:` / `refactor:` /
+  `test:`. Path hints: `.claude/**` → `chore(...)`; meta docs → `docs`; `.github/**` → `ci:`.
 
 **Decision rule:** *"Would this appear in product release notes, or change shipped behavior?"*
 Yes → release track. No → chore track.

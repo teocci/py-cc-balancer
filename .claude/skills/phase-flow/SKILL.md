@@ -41,8 +41,10 @@ Before treating any work as a release, apply the decision rule (base conventions
 - **Yes → release track:** it's a phase — use `phase-complete`.
 - **No → chore track:** do **not** run `phase-complete` (it would wrongly bump the version + tag).
   Commit directly with a Conventional Commit — `chore:` / `docs:` / `ci:` / `build:` / `refactor:`
-  / `test:` (skill/config dirs → `chore(...)`; meta docs → `docs`). No version bump, no CHANGELOG,
-  no RELEASE.md row, no tag. Coherence stays green (chore commits don't touch the version/CHANGELOG).
+  / `test:`. **Everything under `.claude/` (skills, `rules/`, `settings.json`, hooks, commands) is
+  chore-track** → `chore(...)`; meta docs → `docs`; `.github/**` → `ci:`. No version bump, no
+  CHANGELOG, no RELEASE.md row, no tag. Coherence stays green (chore commits don't touch the
+  version/CHANGELOG).
 
 ## Sequencing (the order engine)
 Use `order.py` for both plan-mode ordering and NEXT selection:

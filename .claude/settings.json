@@ -127,7 +127,8 @@
       "Bash(d:/teocci/code/python/py-cc-balancer/.venv/Scripts/python d:/teocci/code/python/py-cc-balancer/.claude/skills/phase-start/scripts/scaffold.py --spec spec.json)",
       "Bash(d:/teocci/code/python/py-cc-balancer/.venv/Scripts/python d:/teocci/code/python/py-cc-balancer/.claude/skills/phase-complete/scripts/finalize_phase.py P-15)",
       "Bash(d:/teocci/code/python/py-cc-balancer/.venv/Scripts/python d:/teocci/code/python/py-cc-balancer/.claude/skills/phase-flow/scripts/order.py --next)",
-      "Bash(.venv/Scripts/python -m py_compile .claude/skills/*/scripts/*.py)"
+      "Bash(.venv/Scripts/python -m py_compile .claude/skills/*/scripts/*.py)",
+      "Bash(git commit -m 'chore\\(skills\\): add phase lifecycle skills \\(start/status/complete/flow\\) + tracking conventions' -m 'Rework the phase/change workflow into four project-agnostic skills, each with *)"
     ],
     "additionalDirectories": [
       "d:\\teocci\\code\\python\\py-cc-balancer\\dist\\ccbalancer",

@@ -16,9 +16,10 @@ Finalize one completed phase (Part A), and when that phase closes its release gr
 cut the release (Part B). Deterministic bookkeeping runs in `scripts/`; you write the prose.
 
 > **Scope — product releases only.** This skill bumps `__version__`, rolls `CHANGELOG.md`, and
-> tags. Use it **only** for shipped-product iterations (a phase). For tooling/`.claude/`/meta-docs/
-> CI work, do **not** run this — commit plainly with a Conventional Commit (`chore:`/`docs:`/`ci:`),
-> no version bump or tag. See the release-track-vs-chore-track rule in
+> tags. Use it **only** for shipped-product iterations (a phase). **Everything under `.claude/`
+> (skills, `rules/`, `settings.json`, hooks), meta-docs, and CI is chore-track** — do **not** run
+> this on it; commit plainly with a Conventional Commit (`chore:`/`docs:`/`ci:`), no version bump
+> or tag. See the release-track-vs-chore-track rule in
 > `../phase-flow/references/conventions.md` §6b.
 
 **Read first:** the base conventions at `../phase-flow/references/conventions.md` and the project
