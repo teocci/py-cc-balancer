@@ -6,16 +6,22 @@ Single-user, distributed as a portable one-dir bundle.
 
 ## How to Resume Implementation
 
-1. Read `docs/PROGRESS.md` — current version, phase status, and what comes next.
-2. Read `docs/DESIGN.md` — architecture decisions and command taxonomy.
-3. Open `docs/phases/phase-<N>.md` for the next pending phase's exact scope.
-4. Say **NEXT** to implement the next pending phase.
+Work flows through the **`phase-*` skill family** — a **phase** is one context-window-sized
+iteration; a **release** bundles one or more phases; a phase bundles one or more items (`I-N`/`F-N`).
+Lifecycle:
 
-Each phase follows this pattern:
-- Implement in `src/ccbalancer/` per the file layout in `docs/DESIGN.md`.
-- Write tests in `tests/`.
-- Run `.venv/Scripts/python -m pytest tests/ -v` — all must pass.
-- Run the `phase-complete` skill to finalize (version bump, CHANGELOG, commit).
+1. **Plan approved** → `phase-start` scaffolds the phases, items, dependency DAG, and release
+   grouping into `docs/PLAN.md` (and stubs + index rows).
+2. **Where are we?** → `phase-status` reports the cursor, unblocked/parallelizable phases, and drift.
+3. **NEXT** → `phase-flow` re-derives the cursor from `docs/PLAN.md` and picks the next unblocked
+   phase (independent phases can run in parallel sessions).
+4. **Implement** the phase in `src/ccbalancer/`, tests in `tests/`; run
+   `.venv/Scripts/python -m pytest tests/ -v` (all must pass).
+5. **Finalize** → `phase-complete` finalizes the phase and, when it closes its release group, cuts
+   the release (version bump, CHANGELOG roll, `docs/RELEASE.md` index, commit, tag, push).
+
+Conventions: base in `.claude/skills/phase-flow/references/conventions.md`, project overrides in
+`docs/conventions/tracking.md`. Architecture + command taxonomy: `docs/DESIGN.md`.
 
 ## Quick Commands
 

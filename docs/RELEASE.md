@@ -1,16 +1,14 @@
 # RELEASE
 
-Release notes per version. Tag `vX.Y.Z` to trigger the GitHub Release workflow (Phase 10).
+Internal release index — one row per cut release, newest first, mapping a version to the phases
+and items it shipped. Public, human-facing notes live in `CHANGELOG.md`; this file is the terse
+index for agents. Pushing a `vX.Y.Z` tag triggers `.github/workflows/release.yml` (build + smoke
+on Win/Linux/macOS, publish portable zips). Written by `phase-complete` (Part B).
 
-## 0.1.1 - 2026-06-21
-
-- F-2: `auth login` now honors the app-wide testnet precedence (flag > `CCB_TESTNET` env > TOML
-  `[global] testnet` > default) instead of forcing every new profile onto the sandbox, so valid
-  mainnet keys no longer fail verification with `retCode 10003`.
-- CI: release workflow bumped to Node-24-era action majors.
-
-## 0.1.0 - 2026-06-21
-
-- Initial release: phased implementation 0–14 plus the multi-profile `auth` command group,
-  packaged as portable one-dir bundles for Windows/Linux/macOS. Includes fix F-1 (ccxt
-  `adjustForTimeDifference`, resolving Bybit `retCode 10002` under local clock skew).
+| Release | Date | Phases | Theme |
+|---------|------|--------|-------|
+| v0.2.0 | 2026-07-17 | I-5, I-6, I-7, I-8, F-5 | Account-CLI overhaul: command-scoped flags, `--fields`, `profile`→`account`, per-account isolation |
+| v0.1.3 | 2026-07-16 | F-4 | OKX `load_markets` preopen crash (ccxt 4.5.65) |
+| v0.1.2 | 2026-07-16 | F-3 | OKX passphrase on `auth login` |
+| v0.1.1 | 2026-06-21 | F-2 | `auth login` testnet precedence; CI action bumps |
+| v0.1.0 | 2026-06-21 | 0–14, Auth | Initial release: phased build (0–14) + multi-profile auth; portable bundles |

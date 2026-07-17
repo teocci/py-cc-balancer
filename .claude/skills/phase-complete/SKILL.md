@@ -1,104 +1,80 @@
 ---
 name: phase-complete
-description: Finalize a completed phase or fix — update PROGRESS.md, CHANGELOG.md, FIXES.md or IMPROVEMENTS.md, bump version, and commit. Run after all tests pass and live testing is done.
+description: Finalize a completed phase and, when it closes a release group, cut the release — stamp detail files, update indexes, roll CHANGELOG, bump the version, index the release, commit, tag, and push. Run after all tests pass and live testing is done.
 triggers:
   - "phase complete"
-  - "mark phase done"
   - "finalize phase"
-  - "bump version"
+  - "finalize this change"
   - "release this phase"
+  - "ship it"
   - "commit this fix"
 ---
 
 # phase-complete
 
-Runs the standard 5-step finalization sequence after a phase or fix is fully done (all unit tests pass, live-tested where applicable).
+Finalize one completed phase (Part A), and when that phase closes its release group in `PLAN.md`,
+cut the release (Part B). Deterministic bookkeeping runs in `scripts/`; you write the prose.
 
-## Required inputs
+> **Scope — product releases only.** This skill bumps `__version__`, rolls `CHANGELOG.md`, and
+> tags. Use it **only** for shipped-product iterations (a phase). For tooling/`.claude/`/meta-docs/
+> CI work, do **not** run this — commit plainly with a Conventional Commit (`chore:`/`docs:`/`ci:`),
+> no version bump or tag. See the release-track-vs-chore-track rule in
+> `../phase-flow/references/conventions.md` §6b.
 
-Before running, confirm:
-- Phase/improvement/fix ID (e.g. `P-1`, `I-11`, `F-9`)
-- Version number (e.g. `0.24.0` for improvement, `0.23.1` for fix)
-- One-line description for CHANGELOG (e.g. `I-11: wb campaign bulk-edit command`)
-- Date (today's date in `YYYY-MM-DD`)
+**Read first:** the base conventions at `../phase-flow/references/conventions.md` and the project
+overrides at `docs/conventions/tracking.md`. Do **not** restate paths/formats here — they live there.
 
-## Step 1 — Write the detail file
+## Preconditions
+- All tests pass: run the project `test_cmd` from `tracking.md` (here: `.venv/Scripts/python -m pytest tests/ -v`). **Never finalize on red.**
+- The phase's code + live testing are done.
+- Know: the phase id, its item ids, the theme, and (for a release) whether this phase closes its release group.
 
-- **Phase** → `docs/phases/phase-<N>.md`
-- **Fix** → `docs/fixes/F-<N>.md` (filename matches the `F-<N>` id in `docs/FIXES.md`)
-- **Improvement** → `docs/improvements/I-<N>.md` (filename matches the `I-<N>` id in `docs/IMPROVEMENTS.md`)
+## Part A — finalize the phase (always)
+1. **Write the prose** the scripts can't: fill each item's detail file body (`docs/improvements/I-N.md` / `docs/fixes/F-N.md`) and the phase detail file (`docs/phases/phase-N.md`) — Objective/Approach or Symptom/Root cause/Fix, the Files-changed table, Verification. Leave the frontmatter `Status/Version/Date` as-is; Part B stamps them.
+2. **Append CHANGELOG `[Unreleased]` bullets** — id-prefixed, in the right `### Added/Changed/Fixed` bucket (see conventions §6.4).
+3. **Mark the phase done** (mechanical):
+   ```bash
+   .venv/Scripts/python .claude/skills/phase-complete/scripts/finalize_phase.py P-<N>
+   ```
+   Flips the phase status to `done` in `PLAN.md` and `PROGRESS.md`. Add the reverse-chron
+   `> Phase N (done): …` narrative blockquote to `PROGRESS.md` yourself (prose).
 
-Include:
-- ID, version, date, test count
-- For a phase/improvement: objective + what was built (bullet list)
-- For a fix: Symptom / Root cause / Fix sections
-- Files changed (table)
-- Any live test results or notable behaviors
+If this phase does **not** close its release group (batched cadence), stop here — the release comes when the last phase in the group finishes.
 
-## Step 2 — Update docs/PROGRESS.md phase index
-
-Find the phase row in the Phase Index table. Change status from `🔲 PLANNED` or `🔄 IN PROGRESS` to `✅ DONE` and fill in the version column. Update the Quick Status table: version number, test count.
-
-## Step 3 — Append to CHANGELOG.md
-
-Add at the top of the file (below the header), after the previous entry:
-
-```markdown
-## vX.Y.Z (YYYY-MM-DD)
-- <phase-id>: <one-line description>
-```
-
-## Step 4 — Clean up docs/FIXES.md or docs/IMPROVEMENTS.md
-
-If this was a fix: update the row in `docs/FIXES.md` index table (status → ✅ DONE, version filled in). Remove any detail stub below the table — that content now lives in `docs/phases/` or `docs/improvements/` or `docs/fixes/`.
-
-If this was an improvement: same for `docs/IMPROVEMENTS.md`.
-
-## Step 5 — Bump version and commit
-
-Edit `src/wb/__init__.py`:
-```python
-__version__ = 'X.Y.Z'
-```
-
-Edit `pyproject.toml`:
-```toml
-version = 'X.Y.Z'
-```
-
-Then commit:
-```bash
-git add -A
-git commit -m "release: vX.Y.Z — <theme>"
-```
-
-## Step 6 — Tag and push
-
-Create the version tag on the release commit and push both the branch and the tag:
-
-```bash
-git tag vX.Y.Z
-git push origin main
-git push origin vX.Y.Z
-```
-
-This triggers the GitHub Release workflow (`.github/workflows/release.yml`), which builds the bundles and publishes the release.
+## Part B — cut the release (only when this phase closes its release group)
+4. **Compute the version** off the current `__version__` using the map (conventions §5): any improvement/feature/greenfield phase in the release → **minor**; fix-only → **patch**; a fix riding an improvement inherits the minor.
+5. **Run the release bookkeeping** (bumps `src/ccbalancer/__init__.py` only — never `pyproject.toml`; rolls CHANGELOG; prepends the RELEASE.md row; stamps every detail file; done-marks the item indexes; marks PLAN rows `released`; updates PROGRESS `**Current version:**`):
+   ```bash
+   .venv/Scripts/python .claude/skills/phase-complete/scripts/cut_release.py \
+     --version X.Y.Z --date <YYYY-MM-DD> --tests <N> --theme "<one-line>" \
+     --phases P-<N> [P-<M> …] --improvements I-a [I-b …] --fixes F-c [F-d …]
+   ```
+   Update the `PROGRESS.md` `**Active phase:**` header line yourself (prose).
+6. **Coherence gate** — must pass before you commit:
+   ```bash
+   .venv/Scripts/python .claude/skills/phase-status/scripts/check_coherence.py
+   ```
+   Also grep the staged diff for secrets (key/secret/token/password/passphrase).
+7. **Commit, tag, push** (base conventions §7 — never add `Co-Authored-By`; keep `.claude/settings.json` staged):
+   ```bash
+   git add -A
+   git commit -m "release: vX.Y.Z — <theme> (IDs)"
+   git tag vX.Y.Z
+   git push origin <current-branch>
+   git push origin vX.Y.Z          # triggers .github/workflows/release.yml
+   ```
 
 ## Verification checklist
-
-- [ ] `docs/phases/<id>.md` or `docs/improvements/<id>.md` or `docs/fixes/<id>.md` exists and has full detail
-- [ ] `docs/PROGRESS.md` Quick Status version matches new version
-- [ ] `docs/PROGRESS.md` phase row shows ✅ DONE
-- [ ] `CHANGELOG.md` has new entry at top
-- [ ] `docs/FIXES.md` or `docs/IMPROVEMENTS.md` row shows ✅ DONE
-- [ ] `src/wb/__init__.py` `__version__` matches new version
-- [ ] `pyproject.toml` `version` matches new version
-- [ ] Commit message format: `release: vX.Y.Z — <theme>`
-- [ ] Tag `vX.Y.Z` created and pushed
-- [ ] Branch pushed to `origin/main`
+- [ ] `test_cmd` green before any edit
+- [ ] Each item + phase detail file has a full body and (after Part B) `✅ DONE` + real version
+- [ ] `CHANGELOG.md` has the rolled `## [X.Y.Z]` block and a fresh empty `## [Unreleased]`
+- [ ] `docs/RELEASE.md` has the new release row on top
+- [ ] `src/ccbalancer/__init__.py` `__version__` == the new version; `pyproject.toml` untouched
+- [ ] `check_coherence.py` exits 0
+- [ ] `PLAN.md` rows for the release are `released`; `PROGRESS.md` `**Current version:**` updated
+- [ ] Commit `release: vX.Y.Z — <theme> (IDs)`, tag `vX.Y.Z`, branch + tag pushed; no `Co-Authored-By`
 
 ## Notes
-
-- This skill is project-agnostic. The paths (`docs/PROGRESS.md`, `src/wb/__init__.py`, etc.) are WB CLI-specific but the methodology transfers to any project using the same three-zone documentation layout.
-- Never commit unless all tests pass (`pytest tests/unit/ -v`).
-- Never add `Co-Authored-By` trailers to commit messages.
+- Scripts do the mechanics; you supply judgment/prose (detail bodies, changelog wording, theme, commit message).
+- If a script reports a table/section it can't find, the file format drifted — reconcile with `tracking.md` before hand-editing.
+- To advance to the next phase after a release, use the `phase-flow` skill (type **NEXT**).
