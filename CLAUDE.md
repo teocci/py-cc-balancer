@@ -36,7 +36,14 @@ py -3.11 -m venv .venv                                              # once, if m
 .venv/Scripts/python -m ccbalancer version
 .venv/Scripts/python -m ccbalancer pair list --json
 .venv/Scripts/python -m ccbalancer plan --json
+.venv/Scripts/python -m ccbalancer simulation run BTC/USDT --start 2022-09-01 --timeframe 1d --targets schedule.jsonl --json
+.venv/Scripts/python -m ccbalancer auth login --paper --exchange binance --no-testnet   # simulated account
 ```
+
+Two simulated axes back live work: **backtest** (`simulation run [--targets <schedule.jsonl>]`, offline
+strategy research over historical candles — [`docs/backtest.md`](docs/backtest.md)) and a **paper account**
+(`auth login --paper`, a credential-free simulated exchange with real public prices that every live command
+runs against unchanged via `--account` — [`docs/paper-account.md`](docs/paper-account.md)).
 
 ### Packaging (portable bundle)
 

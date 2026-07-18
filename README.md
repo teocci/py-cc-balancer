@@ -70,8 +70,8 @@ Commands are grouped by side effect — visible in `--help` so an agent can tell
 | Category | Side effects | Commands |
 |---|---|---|
 | **read** | live data, **no writes** | `status` · `plan` · `analyze` · `indicator list` · `performance` · `regime` · `orders` · `version` |
-| **write** | mutate state / place orders (dry-run by default, guarded) | `rebalance` · `cancel` · `pair` · `indicator set` · `flag` · `config` · `auth` |
-| **audit** | local logs only, **no network** | `decisions` · `history` · `performance --history` · `export` |
+| **write** | mutate state / place orders / fetch data (dry-run by default where it places orders, guarded) | `rebalance` · `cancel` · `reconcile` · `pair` · `indicator set` · `flag` · `config` · `auth` · `paper reset` · `simulation fetch` · `simulation run` |
+| **audit** | local logs only, **no network** | `decisions` · `history` · `performance --history` · `export` · `simulation report` |
 
 Flags are command-scoped — each command's `--help` shows only what it uses. Universal:
 `--json` · `--fields a,b,c` (project JSON to top-level keys) · `--config PATH`. Credential/venue
@@ -115,6 +115,44 @@ ccbalancer history --json
 Plus **agent-defined milestones** (`flag add|list|remove`): persistent watch-conditions the agent
 registers; the CLI evaluates them deterministically and reports hit/miss/unknown.
 
+## Backtesting & paper trading
+
+Two offline/simulated axes let you research a strategy and rehearse execution **before** risking real
+money — complementary, not alternatives.
+
+**Backtest** (`simulation`) — batch-replay the rebalance math over historical candles; answers *"would
+the strategy have made money?"*. Fetch history once, then replay deterministically (same inputs →
+byte-identical ledger + `run_id`), and report P&L with a per-year breakdown. `simulation run --targets`
+replays a **moving** target ratio (a forward-filled `{date, target_volatile_pct}` JSONL schedule)
+instead of the pair's static target, while the CLI keeps applying its own band / min-cost / fee at each
+bar. See [`docs/backtest.md`](docs/backtest.md).
+
+```bash
+ccbalancer simulation fetch BTC/USDT --start 2022-09-01 --end 2026-01-01
+ccbalancer simulation run   BTC/USDT --timeframe 1d --start 2022-09-01 --end 2026-01-01 \
+    --targets schedule.jsonl --capital 10000 --fee-rate 0.001 --json
+ccbalancer simulation report <run_id>
+```
+
+**Paper account** (`auth login --paper`) — a credential-free simulated-exchange account driven
+command-by-command; answers *"does the live order machinery work safely?"*. It reads **real public
+prices** but simulates balances/orders in a persistent book, so every live command
+(`status`/`plan`/`rebalance --execute`/`orders`/`reconcile`/`performance`) runs against it unchanged via
+`--account` — exercising the real confirm-token → write-ahead → reconcile plumbing with no real money.
+See [`docs/paper-account.md`](docs/paper-account.md).
+
+```bash
+ccbalancer auth login --paper --exchange binance --no-testnet --paper-capital 10000
+ccbalancer pair add BTC/USDT --account paper --target 80/20 --band 5 --min-notional 10
+ccbalancer plan --account paper --json                          # real price + a confirm token
+ccbalancer rebalance --account paper --execute --confirm <token>
+ccbalancer reconcile --account paper                            # books the fill once the ticker crosses
+ccbalancer paper reset --account paper                          # re-seed the book for another rehearsal
+```
+
+Neither replaces the capped [`docs/live-smoke-test.md`](docs/live-smoke-test.md), the final gate that
+validates real credentials and a real venue.
+
 ## Stable JSON contract
 
 `--json` writes **machine output to stdout**; all logs go to **stderr**. Every read response is a stable
@@ -129,7 +167,7 @@ envelope:
 ```jsonc
 // ccbalancer plan --json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "command": "plan",
   "exchange": "bybit",
   "testnet": true,

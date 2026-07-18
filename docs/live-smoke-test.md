@@ -2,9 +2,14 @@
 
 A backtest never touches auth, real order placement, real rejections, or partial fills. This runbook
 validates that residual risk **once**, with the smallest possible amount of real money, then stands
-down. Run it before trusting live execution — and specifically before relying on the still-open
-live-execution gap [F-6](fixes/F-6.md) (fills are booked on submission with **no** order-status
-reconciliation, so a resting maker order can be recorded as a fill that never happened).
+down. Run it before trusting live execution — it is the last gate a [paper account](paper-account.md)
+cannot cover (a paper account rehearses the same command flow against live prices but never touches a
+real venue, so it validates the plumbing but not real credentials, real acceptance, or real fills).
+
+Fill booking is handled by the order-status reconciler ([F-6](fixes/F-6.md), shipped in v0.5.1):
+placement is recorded write-ahead and real fills are booked only from exchange order status by the
+`reconcile` command (auto-run at the start of each `rebalance`). This smoke test is where you confirm
+that machinery matches reality on a real venue for the first time.
 
 > **Real funds, real orders.** Everything below places genuine orders on a live account. Keep the cap
 > tiny, keep the `STOP` kill-switch within reach, and stop at the first surprise.
@@ -15,6 +20,9 @@ reconciliation, so a resting maker order can be recorded as a fill that never ha
 - One liquid pair (e.g. `BTC/USDT`) and knowledge of its exchange **min-notional** (~$5–10 on most
   venues). You will trade at, or just above, that floor.
 - Read [`backtest.md`](backtest.md) first — the smoke test confirms what the backtest cannot.
+- **Rehearse with a [paper account](paper-account.md) first** (`auth login --paper`): it drives the
+  identical `plan → rebalance --execute → orders → reconcile` flow against live prices with no real
+  money, so you meet this runbook already knowing the command sequence works.
 
 ## 1. Arm the safety rails first
 
@@ -65,16 +73,18 @@ ccbalancer rebalance --execute --confirm <token-from-plan>
 
 ```bash
 ccbalancer orders                   # our orders are flagged; is it resting (open) or filled?
+ccbalancer reconcile                # book any real fill from exchange status into the local ledger
 ```
 
 - Check the exchange UI/API directly: did the order **rest** (`open`, `filled: 0`) or actually fill?
 - Compare against the local book: `~/.ccbalancer/accounts/<id>/ledger.jsonl` and `state.json`.
 
-> **Watch for F-6.** A maker limit order usually **rests**. If `orders` / the exchange show it open
-> with zero filled, but `ledger.jsonl` / `state.json` already record a full fill at the limit price,
-> you have reproduced [F-6](fixes/F-6.md): the local book diverged from reality on the first order.
-> That divergence is exactly the risk this smoke test exists to catch. Do not run further live orders
-> until it is resolved (or you have manually reconciled state).
+> **Verify the reconciler matched reality.** A maker limit order usually **rests**. Fills are booked
+> only from exchange order status ([F-6](fixes/F-6.md)): a resting order should appear in `orders`
+> as open with **nothing** in `ledger.jsonl` until it actually fills, then `reconcile` (or the auto-
+> reconcile at the next `rebalance`) books exactly the filled delta. Confirm the local book equals the
+> exchange after reconciliation — no fabricated fill on submission, no partial double-counted. Any
+> mismatch is a stop-and-fix.
 
 ## 6. Stand down
 
@@ -90,6 +100,7 @@ expect, a partial fill, or an F-6 divergence — is a stop-and-fix.
 ## What this validates (and what it doesn't)
 
 - **Validates:** credentials/auth, a real order reaching the venue, real acceptance/rejection, and
-  whether the local book matches reality after one fill.
+  whether the reconciler-booked local book matches reality after one real fill.
 - **Does not validate:** strategy profitability (that's the [backtest](backtest.md)), behavior across
-  market regimes, partial-fill handling at scale, or the reconciliation loop F-6 defers.
+  market regimes, or partial-fill handling at scale. (The execution *plumbing* itself — confirm-token,
+  write-ahead, cancel-and-replace, reconcile — is exercised money-free by a [paper account](paper-account.md).)
