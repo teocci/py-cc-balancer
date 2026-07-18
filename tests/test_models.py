@@ -83,8 +83,12 @@ def test_indicator_snapshot_constructs_and_is_frozen() -> None:
         candle_count=200, stale=False, close=65000.0, rsi=55.0,
         macd=12.0, macd_signal=10.0, macd_histogram=2.0,
         ema={'12': 64900.0}, bollinger_upper=66000.0, bollinger_middle=65000.0,
-        bollinger_lower=64000.0, atr=120.0, fib={'0.618': 63000.0},
+        bollinger_lower=64000.0, atr=120.0, adx=30.0, plus_di=28.0, minus_di=12.0,
+        adx_threshold=25.0, adx_trend='trending', fib={'0.618': 63000.0},
+        supports=(64000.0,), resistances=(66000.0, 67000.0),
     )
     assert snap.ema['12'] == 64900.0
+    assert snap.adx == 30.0 and snap.adx_trend == 'trending'
+    assert snap.supports == (64000.0,) and snap.resistances == (66000.0, 67000.0)
     with pytest.raises(dataclasses.FrozenInstanceError):
         snap.close = 1.0  # type: ignore[misc]

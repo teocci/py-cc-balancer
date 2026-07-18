@@ -132,3 +132,23 @@ def test_snapshot_populates_indicator_values(tmp_path):
     assert snapshot.rsi == 100.0
     assert '12' in snapshot.ema
     assert snapshot.fib['0'] == max(c[2] for c in candles)
+
+
+def test_snapshot_populates_adx_and_levels(tmp_path):
+    # A pure uptrend: ADX pins high, all directional movement is up (+DI, -DI=0).
+    candles = [
+        [_BASE_MS + i * _HOUR_MS, i, i + 1.0, i - 1.0, float(i), 10.0]
+        for i in range(1, 60)
+    ]
+    exchange = FakeExchangeStore(ohlcv={('BTC/USDT', '1h'): candles})
+    manager = _manager(tmp_path, exchange)
+
+    snapshot = manager.snapshot('BTC/USDT', '1h', at_ms=_now_after(candles))
+
+    assert snapshot.adx is not None and snapshot.adx > 25.0
+    assert snapshot.minus_di == 0.0
+    assert snapshot.plus_di > snapshot.minus_di
+    assert snapshot.adx_threshold == 25.0
+    assert snapshot.adx_trend == 'trending'
+    assert isinstance(snapshot.supports, tuple)
+    assert isinstance(snapshot.resistances, tuple)

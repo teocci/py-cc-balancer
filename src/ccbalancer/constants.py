@@ -76,10 +76,17 @@ __all__ = [
     'DEFAULT_BOLLINGER_STDDEV',
     'DEFAULT_ATR_PERIOD',
     'DEFAULT_VOLUME_MA_PERIOD',
+    'DEFAULT_ADX_PERIOD',
+    'DEFAULT_ADX_THRESHOLD',
+    'DEFAULT_SR_PIVOT_LOOKBACK',
+    'DEFAULT_SR_CLUSTER_PCT',
+    'DEFAULT_SR_MAX_LEVELS',
     'FIB_RATIOS',
     'RSI_ZONE_OVERBOUGHT',
     'RSI_ZONE_OVERSOLD',
     'RSI_ZONE_NEUTRAL',
+    'ADX_TREND_TRENDING',
+    'ADX_TREND_RANGING',
     'SCHEMA_VERSION',
     'ExitCode',
 ]
@@ -215,6 +222,16 @@ DEFAULT_BOLLINGER_PERIOD = 20
 DEFAULT_BOLLINGER_STDDEV = 2.0
 DEFAULT_ATR_PERIOD = 14
 DEFAULT_VOLUME_MA_PERIOD = 20
+# ADX (Average Directional Index): Wilder lookback and the trend-strength cutoff
+# above which the trend is labelled "trending" rather than "ranging".
+DEFAULT_ADX_PERIOD = 14
+DEFAULT_ADX_THRESHOLD = 25.0
+# Support/Resistance swing-pivot detector: bars of confirmation on each side of a
+# pivot, the percent tolerance that merges nearby pivots into one level, and the
+# cap on levels reported per side.
+DEFAULT_SR_PIVOT_LOOKBACK = 2
+DEFAULT_SR_CLUSTER_PCT = 0.5
+DEFAULT_SR_MAX_LEVELS = 5
 # Standard Fibonacci retracement ratios (0 = swing high, 1 = swing low).
 FIB_RATIOS = (0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0)
 
@@ -223,8 +240,13 @@ RSI_ZONE_OVERBOUGHT = 'overbought'
 RSI_ZONE_OVERSOLD = 'oversold'
 RSI_ZONE_NEUTRAL = 'neutral'
 
-# Version of the stable JSON contract emitted by read commands.
-SCHEMA_VERSION = 1
+# Deterministic ADX trend labels vs the configured threshold (a comparison fact).
+ADX_TREND_TRENDING = 'trending'
+ADX_TREND_RANGING = 'ranging'
+
+# Version of the stable JSON contract emitted by read commands. Bumped to 2 when
+# `analyze` gained the adx{} block and supports[]/resistances[] level lists.
+SCHEMA_VERSION = 2
 
 
 class ExitCode(IntEnum):

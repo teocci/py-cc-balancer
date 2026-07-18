@@ -85,13 +85,15 @@ _EXIT_BY_ERROR: dict[type[AppError], ExitCode] = {
 }
 
 
-# Commands grouped by side effect, shown in `--help` so an agent can tell read
-# (live data, no writes) from write (mutates/places orders) from audit (local
-# logs only, no network).
+# Commands grouped by side effect, shown in `--help` so an agent can tell live
+# reads from local reads, state/order writes from credential writes, and audits
+# (local logs only). Kept in sync by hand as commands are added.
 _COMMAND_TAXONOMY = '''command categories:
-  read   (live data, no side effects):  status, plan, analyze, indicator list, performance, regime, orders, version
-  write  (mutate state / place orders):  rebalance, cancel, pair, indicator set, flag, config
-  audit  (local logs only, no network):  decisions, history, performance --history, export
+  read  (live, network):      status, plan, analyze, performance, regime, orders, flag list, auth status
+  read  (local, no network):  version, indicator list, pair list, config show, auth list, auth whoami
+  write (state / orders):     rebalance, cancel, pair add|set|remove, indicator set, flag add|remove, config init
+  write (credentials):        auth login|logout|use|rename
+  audit (local logs):         decisions, history, performance --history, export
 
 rebalance is dry-run by default; pass --execute --confirm <token> (from plan) to place orders.'''
 
@@ -113,7 +115,13 @@ def build_parser() -> argparse.ArgumentParser:
     acct = [base, account]                 # per-account local commands (no venue/pair)
     parser = argparse.ArgumentParser(
         prog='ccbalancer',
-        description='Agent-driven crypto portfolio rebalancer.',
+        description=(
+            'Agent-driven crypto portfolio rebalancer (two layers).\n'
+            'Layer 1 (this CLI): computes deterministic facts — allocation drift, P&L,\n'
+            'market indicators across timeframes — and executes only what you confirm.\n'
+            'It never judges or decides to trade. Layer 2 (an agent or human) reads the\n'
+            'facts and makes the call.'
+        ),
         epilog=_COMMAND_TAXONOMY,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -166,7 +174,7 @@ def _add_performance_command(subparsers: argparse._SubParsersAction, trade: list
 def _add_regime_command(subparsers: argparse._SubParsersAction, trade: list[argparse.ArgumentParser]) -> None:
     subparsers.add_parser(
         'regime', parents=trade,
-        help='Flag whether the target ratio merits review (price-variance since target-set).',
+        help='Report whether the target ratio merits review (price-variance since target-set).',
     )
 
 
@@ -278,12 +286,14 @@ def _load_config(args: argparse.Namespace) -> config_mod.AppConfig:
 
 def _add_analyze_command(subparsers: argparse._SubParsersAction, parents: list[argparse.ArgumentParser]) -> None:
     analyze = subparsers.add_parser(
-        'analyze', parents=parents, help='Show market indicators for a pair across timeframes.'
+        'analyze', parents=parents,
+        help='Show market indicators for a pair across timeframes (see `indicator list` for the catalog).',
     )
     analyze.add_argument('symbol', help='Pair as BASE/QUOTE (e.g. BTC/USDT).')
     analyze.add_argument(
         '--timeframe', action='append', metavar='TF',
-        help='Timeframe to analyze, repeatable (default: configured timeframes).',
+        help='Timeframe to analyze; repeatable. Typically one of 1m/5m/15m/1h/4h/1d/1w. '
+             'Default: the configured decision + analysis timeframes.',
     )
     analyze.add_argument(
         '--require-fresh', action='store_true', dest='require_fresh',
@@ -368,8 +378,12 @@ def _add_pair_command(subparsers: argparse._SubParsersAction, acct: list[argpars
     pair_parser = subparsers.add_parser('pair', help='Manage portfolio pairs and targets.')
     pair_sub = pair_parser.add_subparsers(dest='pair_command', metavar='<action>')
     pair_sub.add_parser('list', parents=acct, help='List configured pairs.')
+    _pair_action_help = {
+        'add': 'Add a new pair with its target ratio and bands.',
+        'set': 'Update fields of an existing pair.',
+    }
     for action in ('add', 'set'):
-        node = pair_sub.add_parser(action, parents=acct, help=f'{action.capitalize()} a pair.')
+        node = pair_sub.add_parser(action, parents=acct, help=_pair_action_help[action])
         node.add_argument('symbol', help='Pair as BASE/QUOTE (e.g. BTC/USDT).')
         node.add_argument('--target', help='Target ratio volatile/stable, e.g. 80/20.')
         node.add_argument('--band', type=float, help='No-trade band percent.')

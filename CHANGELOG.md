@@ -6,6 +6,23 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-18
+
+ADX + support/resistance indicators; --help discoverability
+
+### Added
+- I-9: `adx` indicator — Wilder ADX with +DI/-DI and a trend-strength threshold, computed per
+  timeframe and surfaced in `analyze` (JSON `adx{}` block, deterministic `adx_trend` label).
+- I-10: `sr` indicator — support/resistance levels from clustered fractal swing pivots, emitted per
+  timeframe as `supports[]`/`resistances[]` (nearest-first, capped) in `analyze`.
+
+### Changed
+- I-9/I-10: `analyze` JSON contract grew (`adx{}`, `supports[]`, `resistances[]`); `SCHEMA_VERSION`
+  bumped to 2.
+- I-11: clearer `--help` — root description states the two-layer "CLI computes, agent judges" model;
+  the command taxonomy now includes `auth` and separates live/local reads and state/credential
+  writes; `analyze --help` documents valid timeframes and points to `indicator list`.
+
 ## [0.2.0] - 2026-07-17
 
 Account-CLI overhaul: command-scoped flags, `--fields` projection, the `profile`→`account`

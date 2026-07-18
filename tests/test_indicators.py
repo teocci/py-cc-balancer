@@ -93,6 +93,80 @@ def test_atr_insufficient_history_is_all_none():
     assert ind.atr([1, 2], [0, 1], [1, 2], period=3) == [None, None]
 
 
+def test_adx_strong_uptrend_is_fully_directional():
+    highs = [float(i) for i in range(1, 21)]
+    lows = [h - 0.5 for h in highs]
+    closes = [h - 0.25 for h in highs]
+    adx_series, plus_di, minus_di = ind.adx(highs, lows, closes, period=3)
+    # +DI/-DI seed at index `period`; ADX at 2*period-1.
+    assert next(i for i, v in enumerate(plus_di) if v is not None) == 3
+    assert next(i for i, v in enumerate(adx_series) if v is not None) == 5
+    # A pure uptrend: all directional movement is up, so ADX pins at 100.
+    assert ind.last_value(plus_di) == pytest.approx(80.0)
+    assert ind.last_value(minus_di) == pytest.approx(0.0)
+    assert ind.last_value(adx_series) == pytest.approx(100.0)
+
+
+def test_adx_downtrend_is_bearishly_directional():
+    highs = [float(i) for i in range(20, 0, -1)]
+    lows = [h - 0.5 for h in highs]
+    closes = [h - 0.25 for h in highs]
+    _, plus_di, minus_di = ind.adx(highs, lows, closes, period=3)
+    assert ind.last_value(plus_di) == pytest.approx(0.0)
+    assert ind.last_value(minus_di) == pytest.approx(80.0)
+
+
+def test_adx_insufficient_history_is_all_none():
+    adx_series, plus_di, minus_di = ind.adx([1, 2, 3, 4], [1, 2, 3, 4], [1, 2, 3, 4], period=14)
+    assert adx_series == plus_di == minus_di == [None] * 4
+
+
+def test_adx_rejects_non_positive_period():
+    with pytest.raises(ValueError):
+        ind.adx([1, 2], [1, 2], [1, 2], period=0)
+
+
+def test_support_resistance_splits_pivots_by_close():
+    highs = [5, 6, 5, 7, 5, 4]
+    lows = [4, 5, 4, 6, 4, 3]
+    closes = [4.5, 5.5, 4.5, 6.5, 4.5, 4.5]
+    supports, resistances = ind.support_resistance(
+        highs, lows, closes, lookback=1, cluster_pct=0.1, max_levels=5
+    )
+    assert supports == [4]           # below the 4.5 close
+    assert resistances == [6, 7]     # at/above it, nearest first
+
+
+def test_support_resistance_clusters_nearby_pivots():
+    highs = [10, 20, 10, 20.05, 10]
+    lows = [5, 6, 5, 6, 5]
+    closes = [10, 10, 10, 10, 10]
+    supports, resistances = ind.support_resistance(
+        highs, lows, closes, lookback=1, cluster_pct=0.5, max_levels=5
+    )
+    assert supports == [5]
+    assert resistances == [pytest.approx(20.025)]   # 20 and 20.05 merged
+
+
+def test_support_resistance_caps_levels_per_side():
+    highs = [3, 4, 3, 5, 3, 6, 3, 7, 3]
+    lows = [2, 2, 2, 2, 2, 2, 2, 2, 2]
+    closes = [0] * 9
+    _, resistances = ind.support_resistance(
+        highs, lows, closes, lookback=1, cluster_pct=0.1, max_levels=2
+    )
+    assert len(resistances) == 2
+
+
+def test_support_resistance_empty_input():
+    assert ind.support_resistance([], [], []) == ([], [])
+
+
+def test_support_resistance_rejects_non_positive_lookback():
+    with pytest.raises(ValueError):
+        ind.support_resistance([1, 2, 3], [1, 2, 3], [1, 2, 3], lookback=0)
+
+
 def test_fib_levels_map_high_low():
     levels = ind.fib_levels(100.0, 0.0)
     assert levels['0'] == 100.0

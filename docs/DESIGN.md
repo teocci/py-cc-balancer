@@ -39,10 +39,13 @@ evaluates them deterministically and reports hits (Layer-2 defines, Layer-1 comp
   is free, no API key. The indicator math never knows which exchange supplied candles → **exchange-
   agnostic**; a `data_exchange` config key picks the source (may differ from the trading exchange).
 - **v1 indicators** (a code **registry**, not a hardcoded set): RSI, MACD(12/26/9), EMA 12/26/200,
-  Bollinger Bands, ATR, Volume MA, Fibonacci retracement levels. Adding an indicator = a pure
-  function + a registry entry. The registry is **introspectable** — `indicator list` serializes each
-  indicator's parameters (name, type, default, current value, description) so an agent can discover
-  the configuration surface, and `indicator set` writes registry-validated overrides.
+  Bollinger Bands, ATR, ADX (+DI/-DI, threshold), support/resistance levels (`sr`), Volume MA,
+  Fibonacci retracement levels. Adding an indicator = a pure function + a registry entry. The
+  registry is **introspectable** — `indicator list` serializes each indicator's parameters (name,
+  type, default, current value, description) so an agent can discover the configuration surface, and
+  `indicator set` writes registry-validated overrides. ADX yields a deterministic `adx_trend` fact
+  (trending/ranging vs threshold); `sr` emits per-timeframe `supports[]`/`resistances[]` from
+  clustered swing pivots — both computed by the CLI, judged by the agent.
 - **Indicator settings vs registry vs storage** (three separate things): the *registry* (which
   indicators exist + their math) is code; *parameters/thresholds* (RSI period + overbought/oversold,
   EMA periods, Volume MA window, …) live in their own `indicators.toml` (kept out of `config.toml`),
@@ -51,7 +54,11 @@ evaluates them deterministically and reports hits (Layer-2 defines, Layer-1 comp
   `[[indicators]]` instance arrays + an agent-managed file, adopted when count actually grows.
 - **Multi-timeframe:** `decision_timeframes = ['1m','5m','15m']` (cadence) and
   `analysis_timeframes = ['1h','4h','1d','1w']` (strategy). Indicators compute per requested timeframe;
-  Fibonacci picks its swing high/low from a per-timeframe lookback.
+  Fibonacci picks its swing high/low from a per-timeframe lookback. The per-timeframe **roles**
+  (1W/1D macro & bias, 4H/1H intermediate, 15Min/5Min execution) and the multi-timeframe alignment
+  strategy are documented in [`trading/timeframes.md`](trading/timeframes.md) (+
+  `trading/timeframe_strategy_map.json`) as the reference for a future MTFA strategy layer — the
+  indicators above are the deterministic inputs it would consume.
 
 ## Key decisions
 

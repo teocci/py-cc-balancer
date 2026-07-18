@@ -43,6 +43,9 @@ def test_analyze_json_emits_stable_contract(appdir, monkeypatch, tmp_path, capsy
     assert frame['timeframe'] == '1h'
     assert frame['stale'] is False
     assert 'rsi' in frame and 'macd' in frame and 'bollinger' in frame and 'fib' in frame
+    assert set(frame['adx']) == {'value', 'plus_di', 'minus_di', 'threshold', 'trend'}
+    assert 'supports' in frame and 'resistances' in frame
+    assert isinstance(frame['supports'], list) and isinstance(frame['resistances'], list)
 
 
 def test_analyze_lowercase_symbol_is_normalized(appdir, monkeypatch, tmp_path, capsys):

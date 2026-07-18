@@ -3,7 +3,7 @@
 The registry is the single source of truth for *which* indicators exist and
 *what parameters each accepts* (name, type, default, description). It exists so a
 caller — especially an AI agent — can discover the configuration surface without
-prior knowledge: ``ccbalancer indicators`` serializes this catalog, and
+prior knowledge: ``ccbalancer indicator list`` serializes this catalog, and
 ``indicator set`` validates writes against it.
 
 The set of indicators is fixed in code (adding one means writing a pure function
@@ -89,6 +89,19 @@ REGISTRY: tuple[IndicatorSpec, ...] = (
     )),
     IndicatorSpec('atr', 'Average True Range (Wilder smoothing)', (
         ParamSpec('period', TYPE_INT, c.DEFAULT_ATR_PERIOD, 'Lookback period.'),
+    )),
+    IndicatorSpec('adx', 'Average Directional Index with +DI/-DI (Wilder smoothing)', (
+        ParamSpec('period', TYPE_INT, c.DEFAULT_ADX_PERIOD, 'Wilder lookback period.'),
+        ParamSpec('threshold', TYPE_FLOAT, c.DEFAULT_ADX_THRESHOLD,
+                  'ADX level above which the trend is labelled trending.'),
+    )),
+    IndicatorSpec('sr', 'Support/resistance levels from clustered swing pivots', (
+        ParamSpec('lookback', TYPE_INT, c.DEFAULT_SR_PIVOT_LOOKBACK,
+                  'Bars of confirmation on each side of a pivot.'),
+        ParamSpec('cluster_pct', TYPE_FLOAT, c.DEFAULT_SR_CLUSTER_PCT,
+                  'Percent tolerance that merges nearby pivots into one level.'),
+        ParamSpec('max_levels', TYPE_INT, c.DEFAULT_SR_MAX_LEVELS,
+                  'Cap on levels reported per side.'),
     )),
     IndicatorSpec('volume', 'Volume moving average', (
         ParamSpec('ma_period', TYPE_INT, c.DEFAULT_VOLUME_MA_PERIOD, 'Volume moving-average window.'),

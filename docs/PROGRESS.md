@@ -1,9 +1,9 @@
 # PROGRESS
 
-**Current version:** 0.2.0
-**Active phase:** v1 released (`v0.1.0`); `v0.2.0` account-CLI overhaul — I-5 (command-scoped
-flags), I-6 (`--fields`), I-7 (`profile`→`account` rename), I-8 + F-5 (per-account data dirs +
-stable account identity). 432 tests. See `docs/improvements/I-5.md`…`I-8.md`, `docs/fixes/F-5.md`.
+**Current version:** 0.3.0
+**Active phase:** `v0.3.0` market-intelligence II — I-9 (ADX +DI/-DI), I-10 (support/resistance
+levels), I-11 (`--help` discoverability). 445 tests. See `docs/phases/phase-15.md`,
+`phase-16.md`, `docs/improvements/I-9.md`…`I-11.md`.
 
 ## Phase status
 
@@ -25,6 +25,8 @@ stable account identity). 432 tests. See `docs/improvements/I-5.md`…`I-8.md`, 
 | 12 | Regime signal + agent flags/milestones | done |
 | 13 | Hardening & docs finalize | done |
 | 14 | Packaging, portable bundle & release CI | done |
+| 15 | Market intelligence II — ADX & Support/Resistance indicators | done |
+| 16 | CLI --help discoverability polish | done |
 
 > **Redefinition (2026-06-18):** the project was re-scoped from a pure rebalancer into an agent
 > decision-support tool (read-only market intelligence + deterministic execution + offline memory).
@@ -33,8 +35,27 @@ stable account identity). 432 tests. See `docs/improvements/I-5.md`…`I-8.md`, 
 
 ## Next action
 
-v1 scope is complete. Cut the first release by tagging `v0.1.0` on `main` (triggers
-`.github/workflows/release.yml`). Deferred post-v1: MCP server, DEX adapter.
+`v0.3.0` cut (ADX + support/resistance + `--help` polish). No active plan — run `phase-start` when
+the next plan is approved. Deferred: the multi-timeframe MTFA strategy layer (see
+`docs/trading/`), MCP server, DEX adapter.
+
+> Phase 16 (done): CLI `--help` discoverability polish (I-11). The root `description` now states the
+> two-layer "CLI computes deterministic facts, never judges; agent/human decides" model; the
+> `_COMMAND_TAXONOMY` epilog gained the previously-missing `auth` command and split live reads from
+> local reads and state writes from credential writes; `analyze --help` enumerates the valid
+> timeframes + default set and points to `indicator list` (dynamically, so new indicators need no
+> help edit); `regime` "Flag"→"Report" and explicit `pair add`/`set` help; a stale registry
+> docstring (`ccbalancer indicators`→`indicator list`) fixed. No behavior change; full suite green.
+> See `docs/phases/phase-16.md`.
+
+> Phase 15 (done): market intelligence II — two registry indicators computed per timeframe and
+> surfaced in `analyze` (I-9, I-10). ADX adds Wilder trend strength with +DI/-DI and a threshold,
+> plus a deterministic `adx_trend` (trending/ranging) label mirroring `rsi_zone`; support/resistance
+> (`sr`) detects fractal swing pivots, clusters them within a percent tolerance, and splits by the
+> latest close into nearest-first, capped `supports[]`/`resistances[]`. Both plug into the existing
+> introspectable registry (auto-flowing into `indicator list`/`set`) — no new architecture. The
+> `analyze` JSON contract grew, so `SCHEMA_VERSION` bumped to 2. 445 tests; `indicators.py` 96%
+> covered. See `docs/phases/phase-15.md`, `docs/improvements/I-9.md`, `I-10.md`.
 
 > Phase 14 (done): packaging, portable bundle & release CI. `packaging/ccbalancer.spec` builds a
 > PyInstaller one-dir bundle (`dist/ccbalancer/`, launcher + `_internal/`) shipping its own Python —

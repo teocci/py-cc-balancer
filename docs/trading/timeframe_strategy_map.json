@@ -1,0 +1,56 @@
+{
+  "schema_version": "1.0",
+  "domain": "crypto_technical_analysis",
+  "timeframes": {
+    "1W": {
+      "category": "Macro",
+      "role": "Global Levels & Market Cycle",
+      "agent_task": "Map macro S/R boundaries (e.g., ATH, Range Low). Filter noise."
+    },
+    "1D": {
+      "category": "Macro",
+      "role": "Directional Bias",
+      "agent_task": "Determine daily trend and validate HTF level holds."
+    },
+    "4H": {
+      "category": "Intermediate",
+      "role": "Swing Structure",
+      "agent_task": "Identify local S/R, patterns, and swing triggers."
+    },
+    "1H": {
+      "category": "Intermediate",
+      "role": "Intraday Bias",
+      "agent_task": "Track intraday momentum and intermediate averages."
+    },
+    "15Min": {
+      "category": "Micro",
+      "role": "Day Trade Execution",
+      "agent_task": "Detect local structural breaks (BOS/CHOCH) for entry."
+    },
+    "5Min": {
+      "category": "Micro",
+      "role": "Scalping & Refinement",
+      "agent_task": "Sniper entries, stop-loss minimization, and scalp execution."
+    }
+  },
+  "mtfa_alignments": [
+    {
+      "style": "Swing",
+      "context_anchor": "1W",
+      "bias_anchor": "1D",
+      "execution_anchor": "4H"
+    },
+    {
+      "style": "Day",
+      "context_anchor": "1D",
+      "bias_anchor": "1H",
+      "execution_anchor": "15Min"
+    },
+    {
+      "style": "Scalp",
+      "context_anchor": "4H",
+      "bias_anchor": "15Min",
+      "execution_anchor": "5Min"
+    }
+  ]
+}

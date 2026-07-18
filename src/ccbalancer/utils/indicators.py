@@ -17,7 +17,10 @@ from statistics import pstdev
 
 from ccbalancer import constants as c
 
-__all__ = ['sma', 'ema', 'rsi', 'macd', 'bollinger', 'atr', 'fib_levels', 'last_value']
+__all__ = [
+    'sma', 'ema', 'rsi', 'macd', 'bollinger', 'atr', 'adx', 'support_resistance',
+    'fib_levels', 'last_value',
+]
 
 
 def sma(values: list[float], period: int) -> list[float | None]:
@@ -148,6 +151,85 @@ def atr(
     return out
 
 
+def adx(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    period: int = c.DEFAULT_ADX_PERIOD,
+) -> tuple[list[float | None], list[float | None], list[float | None]]:
+    '''Average Directional Index with +DI/-DI, all using Wilder smoothing.
+
+    Args:
+        highs: Candle highs.
+        lows: Candle lows.
+        closes: Candle closes (defines the output length).
+        period: Wilder lookback; must be positive.
+
+    Returns:
+        ``(adx, plus_di, minus_di)``, each aligned to ``closes``. ``+DI``/``-DI``
+        have their first value at index ``period``; ``adx`` at index
+        ``2 * period - 1``. Leading positions are ``None``.
+    '''
+    if period <= 0:
+        raise ValueError(f'ADX period must be positive, got {period}')
+    count = len(closes)
+    plus_di: list[float | None] = [None] * count
+    minus_di: list[float | None] = [None] * count
+    adx_series: list[float | None] = [None] * count
+    if count < 2 * period:
+        return adx_series, plus_di, minus_di
+    smoothed_tr = _wilder_smooth(_true_ranges(highs, lows, closes), period)
+    plus_dm, minus_dm = _directional_movement(highs, lows)
+    smoothed_plus = _wilder_smooth(plus_dm, period)
+    smoothed_minus = _wilder_smooth(minus_dm, period)
+    dx: list[float | None] = [None] * count
+    for index in range(period, count):
+        plus_di[index] = _directional_index(smoothed_plus[index], smoothed_tr[index])
+        minus_di[index] = _directional_index(smoothed_minus[index], smoothed_tr[index])
+        dx[index] = _dx_value(plus_di[index], minus_di[index])
+    _fill_adx(adx_series, dx, period)
+    return adx_series, plus_di, minus_di
+
+
+def support_resistance(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    *,
+    lookback: int = c.DEFAULT_SR_PIVOT_LOOKBACK,
+    cluster_pct: float = c.DEFAULT_SR_CLUSTER_PCT,
+    max_levels: int = c.DEFAULT_SR_MAX_LEVELS,
+) -> tuple[list[float], list[float]]:
+    '''Support/resistance price levels from clustered fractal swing pivots.
+
+    A pivot high is a bar whose high tops the ``lookback`` bars on each side; a
+    pivot low is the symmetric bottom on lows. Pivots within ``cluster_pct``
+    percent of one another merge into a single averaged level. Levels below the
+    latest close are supports, at/above it are resistances.
+
+    Args:
+        highs: Candle highs.
+        lows: Candle lows.
+        closes: Candle closes (the last one splits supports from resistances).
+        lookback: Bars of confirmation required on each side of a pivot.
+        cluster_pct: Percent tolerance that merges nearby pivots.
+        max_levels: Cap on levels returned per side.
+
+    Returns:
+        ``(supports, resistances)``, each ordered nearest-to-``close`` first and
+        capped at ``max_levels``.
+    '''
+    if lookback <= 0:
+        raise ValueError(f'S/R lookback must be positive, got {lookback}')
+    if not closes:
+        return [], []
+    levels = _cluster_levels(_swing_pivots(highs, lows, lookback), cluster_pct)
+    close = closes[-1]
+    supports = sorted((lv for lv in levels if lv < close), key=lambda price: close - price)
+    resistances = sorted((lv for lv in levels if lv >= close), key=lambda price: price - close)
+    return supports[:max_levels], resistances[:max_levels]
+
+
 def fib_levels(high: float, low: float) -> dict[str, float]:
     '''Fibonacci retracement levels between a swing ``high`` and ``low``.
 
@@ -195,6 +277,95 @@ def _true_ranges(highs: list[float], lows: list[float], closes: list[float]) -> 
             )
         )
     return true_ranges
+
+
+def _directional_movement(highs: list[float], lows: list[float]) -> tuple[list[float], list[float]]:
+    '''Wilder +DM/-DM per bar, aligned to input; index 0 is ``0.0`` (no prior bar).'''
+    plus = [0.0] * len(highs)
+    minus = [0.0] * len(highs)
+    for index in range(1, len(highs)):
+        up_move = highs[index] - highs[index - 1]
+        down_move = lows[index - 1] - lows[index]
+        plus[index] = up_move if up_move > down_move and up_move > 0 else 0.0
+        minus[index] = down_move if down_move > up_move and down_move > 0 else 0.0
+    return plus, minus
+
+
+def _wilder_smooth(values: list[float], period: int) -> list[float | None]:
+    '''Wilder running sum aligned to ``values``; first sum at index ``period`` over 1..period.'''
+    out: list[float | None] = [None] * len(values)
+    if len(values) <= period:
+        return out
+    running = sum(values[1: period + 1])
+    out[period] = running
+    for index in range(period + 1, len(values)):
+        running = running - running / period + values[index]
+        out[index] = running
+    return out
+
+
+def _directional_index(smoothed_dm: float | None, smoothed_tr: float | None) -> float:
+    if not smoothed_tr:
+        return 0.0
+    return 100.0 * smoothed_dm / smoothed_tr
+
+
+def _dx_value(plus_di: float, minus_di: float) -> float:
+    total = plus_di + minus_di
+    if total == 0:
+        return 0.0
+    return 100.0 * abs(plus_di - minus_di) / total
+
+
+def _fill_adx(adx_series: list[float | None], dx: list[float | None], period: int) -> None:
+    '''Seed ADX with the mean of the first ``period`` DX values, then Wilder-average.'''
+    first = 2 * period - 1
+    if first >= len(dx):
+        return
+    previous = sum(dx[period: first + 1]) / period
+    adx_series[first] = previous
+    for index in range(first + 1, len(dx)):
+        previous = (previous * (period - 1) + dx[index]) / period
+        adx_series[index] = previous
+
+
+def _swing_pivots(highs: list[float], lows: list[float], lookback: int) -> list[float]:
+    '''Fractal pivot prices: highs that top their neighbours, lows that bottom theirs.'''
+    pivots: list[float] = []
+    for index in range(lookback, len(highs) - lookback):
+        window = range(index - lookback, index + lookback + 1)
+        if _is_pivot_high(highs, index, window):
+            pivots.append(highs[index])
+        if _is_pivot_low(lows, index, window):
+            pivots.append(lows[index])
+    return pivots
+
+
+def _is_pivot_high(highs: list[float], index: int, window: range) -> bool:
+    return (all(highs[index] >= highs[j] for j in window)
+            and any(highs[index] > highs[j] for j in window))
+
+
+def _is_pivot_low(lows: list[float], index: int, window: range) -> bool:
+    return (all(lows[index] <= lows[j] for j in window)
+            and any(lows[index] < lows[j] for j in window))
+
+
+def _cluster_levels(pivots: list[float], cluster_pct: float) -> list[float]:
+    '''Merge sorted pivots within ``cluster_pct`` percent into averaged levels.'''
+    levels: list[float] = []
+    for price in sorted(pivots):
+        if levels and _within_pct(price, levels[-1], cluster_pct):
+            levels[-1] = (levels[-1] + price) / 2
+        else:
+            levels.append(price)
+    return levels
+
+
+def _within_pct(price: float, reference: float, pct: float) -> bool:
+    if reference == 0:
+        return price == 0
+    return abs(price - reference) / abs(reference) * 100.0 <= pct
 
 
 def _ema_optional(series: list[float | None], period: int) -> list[float | None]:

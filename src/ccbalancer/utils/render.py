@@ -184,9 +184,18 @@ def indicator_to_dict(snapshot: IndicatorSnapshot) -> dict[str, object]:
             'lower': snapshot.bollinger_lower,
         },
         'atr': snapshot.atr,
+        'adx': {
+            'value': snapshot.adx,
+            'plus_di': snapshot.plus_di,
+            'minus_di': snapshot.minus_di,
+            'threshold': snapshot.adx_threshold,
+            'trend': snapshot.adx_trend,
+        },
         'volume': snapshot.volume,
         'volume_ma': snapshot.volume_ma,
         'fib': snapshot.fib,
+        'supports': list(snapshot.supports),
+        'resistances': list(snapshot.resistances),
     }
 
 
@@ -754,11 +763,18 @@ def _format_last(last_at: str | None, days_since: float | None) -> str:
 def _analyze_line(snapshot: IndicatorSnapshot) -> str:
     flag = ' [stale]' if snapshot.stale else ''
     zone = f' ({snapshot.rsi_zone})' if snapshot.rsi_zone else ''
+    trend = f' ({snapshot.adx_trend})' if snapshot.adx_trend else ''
     return (
         f'  {snapshot.timeframe}  close {_fmt(snapshot.close)}  rsi {_fmt(snapshot.rsi)}{zone}  '
         f'macd {_fmt(snapshot.macd)}/{_fmt(snapshot.macd_signal)}  atr {_fmt(snapshot.atr)}  '
+        f'adx {_fmt(snapshot.adx)}{trend}  '
+        f'sr {_fmt_levels(snapshot.supports)}|{_fmt_levels(snapshot.resistances)}  '
         f'vol {_fmt(snapshot.volume)}/{_fmt(snapshot.volume_ma)}  as_of {snapshot.as_of}{flag}'
     )
+
+
+def _fmt_levels(levels: tuple[float, ...]) -> str:
+    return 'n/a' if not levels else ','.join(f'{level:g}' for level in levels)
 
 
 def _fmt(value: float | None) -> str:

@@ -14,10 +14,17 @@ from ccbalancer.utils import indicator_registry as registry
 
 def test_default_values_cover_every_indicator():
     values = registry.default_values()
-    assert {'rsi', 'macd', 'ema', 'bollinger', 'atr', 'volume', 'fib'} <= set(values)
+    expected = {'rsi', 'macd', 'ema', 'bollinger', 'atr', 'adx', 'sr', 'volume', 'fib'}
+    assert expected <= set(values)
     assert values['rsi']['period'] == 14
     assert values['rsi']['overbought'] == 70.0
     assert values['ema']['periods'] == [12, 26, 200]
+
+
+def test_default_values_include_adx_and_sr_params():
+    values = registry.default_values()
+    assert values['adx'] == {'period': 14, 'threshold': 25.0}
+    assert values['sr'] == {'lookback': 2, 'cluster_pct': 0.5, 'max_levels': 5}
 
 
 def test_default_values_are_independent_copies():

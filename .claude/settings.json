@@ -145,7 +145,17 @@
       "Bash(git ls-tree *)",
       "Bash(git rev-list *)",
       "Bash(git switch *)",
-      "Bash(git branch *)"
+      "Bash(git branch *)",
+      "Bash(.venv/Scripts/python .claude/skills/phase-start/scripts/scaffold.py --spec \"C:/Users/teocci/AppData/Local/Temp/claude/d--teocci-code-python-py-cc-balancer/296cff67-7270-4cbd-8aad-5b68ff93b5df/scratchpad/phase-spec.json\" --dry-run)",
+      "Bash(.venv/Scripts/python .claude/skills/phase-start/scripts/scaffold.py --spec \"C:/Users/teocci/AppData/Local/Temp/claude/d--teocci-code-python-py-cc-balancer/296cff67-7270-4cbd-8aad-5b68ff93b5df/scratchpad/phase-spec.json\")",
+      "Bash(.venv/Scripts/python -m ccbalancer analyze --help)",
+      "Bash(.venv/Scripts/python -m ccbalancer indicator list --json)",
+      "Bash(.venv/Scripts/python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('indicators:', [i['name'] for i in d['indicators']]\\); adx=[i for i in d['indicators'] if i['name']=='adx'][0]; sr=[i for i in d['indicators'] if i['name']=='sr'][0]; print\\('adx params:', [\\(p['name'],p['default']\\) for p in adx['params']]\\); print\\('sr params:', [\\(p['name'],p['default']\\) for p in sr['params']]\\)\")",
+      "Bash(.venv/Scripts/python -m pytest tests/ --cov=ccbalancer --cov-report=term-missing)",
+      "Bash(.venv/Scripts/python .claude/skills/phase-complete/scripts/finalize_phase.py P-15)",
+      "Bash(.venv/Scripts/python .claude/skills/phase-complete/scripts/finalize_phase.py P-16)",
+      "Bash(.venv/Scripts/python .claude/skills/phase-complete/scripts/cut_release.py --version 0.3.0 --date 2026-07-18 --tests 445 --theme \"ADX + support/resistance indicators; --help discoverability\" --phases P-15 P-16 --improvements I-9 I-10 I-11)",
+      "Bash(git diff *)"
     ],
     "additionalDirectories": [
       "d:\\teocci\\code\\python\\py-cc-balancer\\dist\\ccbalancer",

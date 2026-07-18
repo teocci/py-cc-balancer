@@ -127,6 +127,16 @@ class IndicatorsManager:
         upper, middle, lower = indicators.bollinger(
             closes, s.get('bollinger', 'period'), s.get('bollinger', 'stddev')
         )
+        adx_line, plus_di_line, minus_di_line = indicators.adx(
+            highs, lows, closes, s.get('adx', 'period')
+        )
+        adx_value = indicators.last_value(adx_line)
+        supports, resistances = indicators.support_resistance(
+            highs, lows, closes,
+            lookback=s.get('sr', 'lookback'),
+            cluster_pct=s.get('sr', 'cluster_pct'),
+            max_levels=s.get('sr', 'max_levels'),
+        )
         return IndicatorSnapshot(
             symbol=symbol,
             timeframe=timeframe,
@@ -146,9 +156,16 @@ class IndicatorsManager:
             bollinger_middle=indicators.last_value(middle),
             bollinger_lower=indicators.last_value(lower),
             atr=indicators.last_value(indicators.atr(highs, lows, closes, s.get('atr', 'period'))),
+            adx=adx_value,
+            plus_di=indicators.last_value(plus_di_line),
+            minus_di=indicators.last_value(minus_di_line),
+            adx_threshold=s.get('adx', 'threshold'),
+            adx_trend=self._adx_trend(adx_value),
             volume=volumes[-1] if volumes else None,
             volume_ma=indicators.last_value(indicators.sma(volumes, s.get('volume', 'ma_period'))),
             fib=indicators.fib_levels(max(highs), min(lows)),
+            supports=tuple(supports),
+            resistances=tuple(resistances),
         )
 
     def _ema_map(self, closes: list[float]) -> dict[str, float]:
@@ -168,3 +185,11 @@ class IndicatorsManager:
         if rsi <= self.settings.get('rsi', 'oversold'):
             return c.RSI_ZONE_OVERSOLD
         return c.RSI_ZONE_NEUTRAL
+
+    def _adx_trend(self, adx: float | None) -> str | None:
+        '''Label ADX against the configured threshold (a comparison fact).'''
+        if adx is None:
+            return None
+        if adx >= self.settings.get('adx', 'threshold'):
+            return c.ADX_TREND_TRENDING
+        return c.ADX_TREND_RANGING

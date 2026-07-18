@@ -37,9 +37,17 @@ class IndicatorSnapshot:
         bollinger_middle: Latest middle Bollinger band, or ``None``.
         bollinger_lower: Latest lower Bollinger band, or ``None``.
         atr: Latest ATR, or ``None``.
+        adx: Latest ADX (trend strength), or ``None``.
+        plus_di: Latest +DI (bullish directional index), or ``None``.
+        minus_di: Latest -DI (bearish directional index), or ``None``.
+        adx_threshold: Configured ADX trend-strength threshold (for interpretation).
+        adx_trend: Deterministic label vs the threshold (``trending``/``ranging``),
+            or ``None`` if ADX is unavailable. A fact, not advice.
         volume: Latest candle volume, or ``None``.
         volume_ma: Latest volume moving average, or ``None``.
         fib: Fibonacci ratio (as string) -> price over the candle window.
+        supports: Support price levels below the latest close, nearest first.
+        resistances: Resistance price levels at/above the latest close, nearest first.
     '''
 
     symbol: str
@@ -60,6 +68,13 @@ class IndicatorSnapshot:
     bollinger_middle: float | None = None
     bollinger_lower: float | None = None
     atr: float | None = None
+    adx: float | None = None
+    plus_di: float | None = None
+    minus_di: float | None = None
+    adx_threshold: float | None = None
+    adx_trend: str | None = None
     volume: float | None = None
     volume_ma: float | None = None
     fib: dict[str, float] = field(default_factory=dict)
+    supports: tuple[float, ...] = ()
+    resistances: tuple[float, ...] = ()
