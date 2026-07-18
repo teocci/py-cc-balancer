@@ -14,6 +14,7 @@ import logging
 import os
 import sys
 from dataclasses import replace
+from pathlib import Path
 
 from ccbalancer import __version__
 from ccbalancer import config as config_mod
@@ -76,9 +77,12 @@ from ccbalancer.stores.history_fetch import BinanceHistoryFetch
 from ccbalancer.stores.ledger_store import LedgerStore
 from ccbalancer.stores.market_cache import MarketCache
 from ccbalancer.stores.order_store import OrderStore
+from ccbalancer.stores.paper_book import PaperBookStore
+from ccbalancer.stores.paper_exchange import PaperExchangeStore
 from ccbalancer.stores.portfolio_store import PortfolioStore, pair_to_dict
 from ccbalancer.stores.simulation_store import SimulationStore
 from ccbalancer.stores.state_store import StateStore
+from ccbalancer.stores.target_schedule import TargetSchedule, load_target_schedule
 from ccbalancer.utils import indicator_registry as registry
 from ccbalancer.utils import render
 from ccbalancer.utils.logging import configure_logging
@@ -106,8 +110,8 @@ _EXIT_BY_ERROR: dict[type[AppError], ExitCode] = {
 _COMMAND_TAXONOMY = '''command categories:
   read  (live, network):      status, plan, analyze, performance, regime, orders, flag list, auth status
   read  (local, no network):  version, indicator list, pair list, config show, auth list, auth whoami
-  write (data):               simulation fetch (network), simulation run (local backtest)
-  write (state / orders):     rebalance, cancel, reconcile, pair add|set|remove, indicator set, flag add|remove, config init
+  write (data):               simulation fetch (network), simulation run (local backtest; --targets schedule)
+  write (state / orders):     rebalance, cancel, reconcile, pair add|set|remove, indicator set, flag add|remove, config init, paper reset
   write (credentials):        auth login|logout|use|rename
   audit (local logs):         decisions, history, performance --history, export, simulation report
 
@@ -154,6 +158,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_indicator_command(subparsers, [base])
     _add_config_command(subparsers, [base], [base, account, venue])
     _add_auth_command(subparsers, [base], [base, account], [base, venue])
+    _add_paper_command(subparsers, acct)
     _add_pair_command(subparsers, acct)
     _add_audit_commands(subparsers, [base, account, pair])
     return parser
@@ -389,6 +394,11 @@ def _add_simulation_run(sub: argparse._SubParsersAction, parents: list[argparse.
         '--min-cost', type=float, default=SIM_DEFAULT_MIN_COST, dest='min_cost', metavar='QUOTE',
         help='Exchange min-notional floor; an order below it is rejected (default: 0 = no floor).',
     )
+    run.add_argument(
+        '--targets', metavar='PATH', dest='targets', default=None,
+        help='JSONL target schedule ({"date","target_volatile_pct"} per line, ascending); '
+             'rebalance toward a moving target (forward-filled) instead of the pair\'s static one.',
+    )
 
 
 def _add_indicator_command(subparsers: argparse._SubParsersAction, parents: list[argparse.ArgumentParser]) -> None:
@@ -462,6 +472,33 @@ def _add_auth_login(sub: argparse._SubParsersAction, login_parents: list[argpars
         '--force', action='store_true',
         help='Re-point the account even if the new key resolves to a different exchange account.',
     )
+    login.add_argument(
+        '--paper', action='store_true',
+        help='Create a paper (simulated-exchange) account: no credentials; --exchange names the '
+             'real venue whose public prices drive a simulated book (default name: paper).',
+    )
+    login.add_argument(
+        '--paper-capital', type=float, default=c.DEFAULT_PAPER_CAPITAL, dest='paper_capital',
+        metavar='QUOTE', help=f'Initial all-stable paper balance (default: {c.DEFAULT_PAPER_CAPITAL}).',
+    )
+    login.add_argument(
+        '--paper-quote', default=c.DEFAULT_PAPER_QUOTE, dest='paper_quote', metavar='ASSET',
+        help=f'Stable asset the paper capital is seeded in (default: {c.DEFAULT_PAPER_QUOTE}).',
+    )
+
+
+def _add_paper_command(subparsers: argparse._SubParsersAction, acct: list[argparse.ArgumentParser]) -> None:
+    paper = subparsers.add_parser('paper', help='Manage paper (simulated-exchange) accounts.')
+    sub = paper.add_subparsers(dest='paper_command', metavar='<action>')
+    reset = sub.add_parser('reset', parents=acct, help='Re-seed a paper account book to a fresh balance.')
+    reset.add_argument(
+        '--paper-capital', type=float, default=c.DEFAULT_PAPER_CAPITAL, dest='paper_capital',
+        metavar='QUOTE', help=f'New all-stable balance (default: {c.DEFAULT_PAPER_CAPITAL}).',
+    )
+    reset.add_argument(
+        '--paper-quote', default=c.DEFAULT_PAPER_QUOTE, dest='paper_quote', metavar='ASSET',
+        help=f'Stable asset to seed (default: {c.DEFAULT_PAPER_QUOTE}).',
+    )
 
 
 def _add_pair_command(subparsers: argparse._SubParsersAction, acct: list[argparse.ArgumentParser]) -> None:
@@ -520,6 +557,8 @@ def _dispatch(args: argparse.Namespace) -> ExitCode:
         return _cmd_config(args)
     if args.command == 'auth':
         return _cmd_auth(args)
+    if args.command == 'paper':
+        return _cmd_paper(args)
     if args.command == 'pair':
         return _cmd_pair(args)
     if args.command == 'decisions':
@@ -916,6 +955,7 @@ def _cmd_simulation_run(args: argparse.Namespace) -> ExitCode:
     manager = _simulation_run_manager(config)
     start_ms = iso_to_ms(args.start)
     end_ms = iso_to_ms(args.end) if args.end else now_ms()
+    schedule = _load_target_schedule(args.targets, start_ms)
     params = ReplayParams(
         capital=args.capital,
         fee_rate=args.fee_rate,
@@ -923,10 +963,27 @@ def _cmd_simulation_run(args: argparse.Namespace) -> ExitCode:
         min_cost=args.min_cost,
     )
     result = manager.run(config.data_exchange, symbol, args.timeframe, start_ms, end_ms, pair, params,
-                         fill_timeframe=args.fill_timeframe)
+                         fill_timeframe=args.fill_timeframe, schedule=schedule)
     meta = {'exchange': config.data_exchange, 'testnet': config.testnet, 'generated_at': now_iso()}
     _emit(args, render.simulation_run_response(result, meta), render.simulation_run_lines(result))
     return ExitCode.OK
+
+
+def _load_target_schedule(path: str | None, start_ms: int) -> TargetSchedule | None:
+    '''Load and validate a ``--targets`` schedule, or return ``None`` if unset.
+
+    Warns (stderr) when no step is at/before the replay start, since the pair's
+    configured target then applies to the leading bars.
+    '''
+    if path is None:
+        return None
+    schedule = load_target_schedule(Path(path))
+    if not schedule.covers_start(start_ms):
+        _logger.warning(
+            'Target schedule %s has no record at/before --start; the pair\'s configured '
+            'target applies until the first scheduled date', path,
+        )
+    return schedule
 
 
 def _simulation_run_manager(config: config_mod.AppConfig) -> SimulationRunManager:
@@ -1023,8 +1080,21 @@ def _read_context(
 
 
 def _exchange_store(config: config_mod.AppConfig) -> ExchangeStore:
-    '''Build the exchange store (seam for tests to inject a fake).'''
+    '''Build the exchange store (seam for tests to inject a fake).
+
+    A paper account returns a :class:`PaperExchangeStore` — real public prices,
+    a simulated book — so every live command runs unchanged against it.
+    '''
+    if config.paper:
+        return _paper_exchange_store(config.data_exchange, config.testnet, config.data_dir)
     return ExchangeStore.from_config(config)
+
+
+def _paper_exchange_store(data_exchange: str, testnet: bool, data_dir) -> PaperExchangeStore:
+    '''Build a paper exchange store: public market data + the account's simulated book.'''
+    market = ExchangeStore(exchange_id=data_exchange, testnet=testnet)
+    book = PaperBookStore(data_dir / c.PAPER_BOOK_FILENAME)
+    return PaperExchangeStore(book, market)
 
 
 def _selected_pairs(store: PortfolioStore, requested: list[str] | None) -> list[PairConfig]:
@@ -1085,6 +1155,8 @@ def _cmd_auth(args: argparse.Namespace) -> ExitCode:
 
 
 def _cmd_auth_login(args: argparse.Namespace) -> ExitCode:
+    if args.paper:
+        return _cmd_auth_login_paper(args)
     exchange = _login_exchange(args)
     name = normalize_account_name(args.account or exchange)
     testnet = config_mod.resolve_login_testnet(args.testnet, args.config)
@@ -1096,6 +1168,31 @@ def _cmd_auth_login(args: argparse.Namespace) -> ExitCode:
     store.add_or_update(account)
     _emit_login(args, account, store.active_name(), verified)
     return ExitCode.EXCHANGE_ERROR if verified is False else ExitCode.OK
+
+
+def _cmd_auth_login_paper(args: argparse.Namespace) -> ExitCode:
+    '''Create a paper account and seed its simulated book (no credentials, no verify).'''
+    exchange = _login_exchange(args)  # the real venue whose public prices drive the book
+    name = normalize_account_name(args.account or 'paper')
+    testnet = config_mod.resolve_login_testnet(args.testnet, args.config)
+    account = Account(name, exchange, testnet, paper=True)
+    store = _auth_store(args)
+    account = _apply_identity(store, account, ref=None, force=args.force)
+    store.add_or_update(account)
+    saved = store.get(name)  # re-read to get the minted stable id (keys the data dir)
+    _seed_paper_book(saved, args.paper_quote, args.paper_capital)
+    payload = {'command': 'auth login', 'account': render.masked_account(saved),
+               'active': store.active_name(), 'paper': True,
+               'capital': {args.paper_quote.upper(): args.paper_capital}}
+    _emit(args, payload, [f'Created paper account {name} ({exchange} prices): '
+                          f'{args.paper_capital} {args.paper_quote.upper()} seeded'])
+    return ExitCode.OK
+
+
+def _seed_paper_book(account: Account, quote: str, capital: float) -> None:
+    '''Seed (or reset) a paper account's book to an all-stable starting balance.'''
+    data_dir = config_mod.account_data_dir(config_mod.resolve_app_dir(), account)
+    PaperBookStore(data_dir / c.PAPER_BOOK_FILENAME).seed(quote.upper(), capital)
 
 
 def _verify_and_capture_ref(
@@ -1312,7 +1409,14 @@ def _probe_account(account: Account) -> bool | None:
 
 
 def _account_exchange_store(account: Account) -> ExchangeStore:
-    '''Build an exchange store for an account (seam for tests to inject a fake).'''
+    '''Build an exchange store for an account (seam for tests to inject a fake).
+
+    A paper account resolves to its simulated book so `auth status`/`whoami`
+    probes report the simulated balance rather than hitting a real venue.
+    '''
+    if account.paper:
+        data_dir = config_mod.account_data_dir(config_mod.resolve_app_dir(), account)
+        return _paper_exchange_store(account.exchange, account.testnet, data_dir)
     return ExchangeStore(
         exchange_id=account.exchange,
         testnet=account.testnet,
@@ -1320,6 +1424,28 @@ def _account_exchange_store(account: Account) -> ExchangeStore:
         api_secret=account.api_secret,
         password=account.password,
     )
+
+
+def _cmd_paper(args: argparse.Namespace) -> ExitCode:
+    if args.paper_command == 'reset':
+        return _cmd_paper_reset(args)
+    _emit(args, {'error': 'specify: paper reset'}, ['Usage: paper reset'])
+    return ExitCode.CONFIG_ERROR
+
+
+def _cmd_paper_reset(args: argparse.Namespace) -> ExitCode:
+    config = _load_config(args)
+    if not config.paper:
+        raise AuthError(
+            f'Account {config.account or "(none)"!r} is not a paper account; '
+            'create one with `ccbalancer auth login --paper` (name via --account)'
+        )
+    quote = args.paper_quote.upper()
+    PaperBookStore(config.data_dir / c.PAPER_BOOK_FILENAME).seed(quote, args.paper_capital)
+    payload = {'command': 'paper reset', 'account': config.account,
+               'capital': {quote: args.paper_capital}}
+    _emit(args, payload, [f'Reset paper account {config.account}: {args.paper_capital} {quote}'])
+    return ExitCode.OK
 
 
 def _cmd_pair(args: argparse.Namespace) -> ExitCode:

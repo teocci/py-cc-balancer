@@ -20,10 +20,46 @@ ccbalancer simulation fetch BTC/USDT --start 2022-09-01 --end 2026-01-01
 ccbalancer simulation run BTC/USDT --timeframe 1d --start 2022-09-01 --end 2026-01-01 \
     --capital 10000 --fee-rate 0.001 --json
 #    optional: --fill-timeframe 1h resolves fills on finer bars within each daily interval.
+#    optional: --targets schedule.jsonl replays a moving target ratio (see below).
 
 # 3. Report P&L / ROI / per-year breakdown for the run (offline).
 ccbalancer simulation report <run_id>
 ```
+
+## Moving the target over time — `--targets schedule.jsonl`
+
+By default the backtest rebalances toward the pair's single configured
+`target_volatile_pct` for the whole window. `--targets` instead replays a
+**per-decision target schedule** — a forward-filled step function — so you can
+backtest a strategy that de-risks (or re-risks) the ratio over a cycle while the
+CLI keeps applying its own band / min-cost / fee mechanics at each bar.
+
+```bash
+ccbalancer simulation run BTC/USDT --start 2022-09-01 --end 2026-07-18 \
+    --timeframe 1d --targets schedule.jsonl --capital 10000 --fee-rate 0.001 --json
+```
+
+`schedule.jsonl` — one record per bar where the target changes, ascending by date:
+
+```jsonl
+{"date": "2022-09-05", "target_volatile_pct": 90.0}
+{"date": "2023-11-06", "target_volatile_pct": 72.0}
+{"date": "2024-03-11", "target_volatile_pct": 54.0}
+{"date": "2024-11-18", "target_volatile_pct": 40.0}
+```
+
+- `date` — ISO-8601, UTC, aligned to a decision-bar open (the `--timeframe`, e.g. 1d/1w).
+- `target_volatile_pct` — `0`–`100`, the volatile-side target to rebalance toward from that bar on.
+- **Semantics:** before the first record → the pair's configured target; the schedule is
+  forward-filled (a step function) thereafter.
+- **Validation:** targets in `[0, 100]`; dates strictly increasing. A schedule whose first record is
+  *after* `--start` runs with a warning (the configured target applies to the leading bars).
+- **Determinism/provenance:** the schedule is folded into the `run_id` (a different schedule → a
+  distinct id; the same one re-runs byte-identically), and its digest + step count are recorded in
+  the run's `run.json`.
+- **When a step actually fires:** a target change only *acts* on the first later bar where drift
+  exceeds `band_pct` (and the optional `TOO_SOON` cadence guard passes) — not necessarily on the
+  step's own date.
 
 ## How to read a result
 

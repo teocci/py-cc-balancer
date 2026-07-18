@@ -181,3 +181,45 @@ def test_aligned_replay_is_deterministic():
     b = replay(daily, _pair(), _rebalancer(), _params(fee_rate=0.001), fill_candles=fill_candles)
     assert a.fills == b.fills
     assert (a.final_base, a.final_stable) == (b.final_base, b.final_stable)
+
+
+# --- External target schedule (I-17): a forward-filled step function overrides ---
+# the pair's static target per decision bar; the pure RebalanceManager is unchanged.
+
+from ccbalancer.stores.target_schedule import TargetSchedule  # noqa: E402
+
+# Four flat bars at 100: bar0 BUYs to the target, bar1 fills it; a scheduled target
+# drop then makes bar2 SELL and bar3 fill it. All crossings are guaranteed at 100.
+_FLAT = [_candle(0, 100, 100, 100, 100), _candle(1, 100, 100, 100, 100),
+         _candle(2, 100, 100, 100, 100), _candle(3, 100, 100, 100, 100)]
+
+
+def test_schedule_moving_target_triggers_a_sell_a_static_run_would_not():
+    # Static 80/20: one BUY on bar1, then within-band holds -> a single fill.
+    static = replay(_FLAT, _pair(), _rebalancer(), _params(fee_rate=0.0))
+    assert [f.side for f in static.fills] == ['buy']
+
+    # Schedule flips the target to 0 from bar2: the ~80%-base book now over-holds
+    # base -> a SELL on bar2 fills on bar3. Two fills, ending all-stable.
+    schedule = TargetSchedule(((_START + 2 * _DAY_MS, 0.0),))
+    scheduled = replay(_FLAT, _pair(), _rebalancer(), _params(fee_rate=0.0), schedule=schedule)
+    assert [f.side for f in scheduled.fills] == ['buy', 'sell']
+    assert scheduled.final_base == pytest.approx(0.0)
+    assert scheduled.final_stable == pytest.approx(10000.0)
+
+
+def test_schedule_before_first_step_uses_configured_target():
+    # A step dated after every bar never fires -> identical to the static run.
+    future = TargetSchedule(((_START + 100 * _DAY_MS, 0.0),))
+    static = replay(_FLAT, _pair(), _rebalancer(), _params(fee_rate=0.0))
+    scheduled = replay(_FLAT, _pair(), _rebalancer(), _params(fee_rate=0.0), schedule=future)
+    assert scheduled.fills == static.fills
+    assert (scheduled.final_base, scheduled.final_stable) == (static.final_base, static.final_stable)
+
+
+def test_schedule_replay_is_deterministic():
+    schedule = TargetSchedule(((_START + 2 * _DAY_MS, 0.0),))
+    a = replay(_FLAT, _pair(), _rebalancer(), _params(fee_rate=0.001), schedule=schedule)
+    b = replay(_FLAT, _pair(), _rebalancer(), _params(fee_rate=0.001), schedule=schedule)
+    assert a.fills == b.fills
+    assert (a.final_base, a.final_stable) == (b.final_base, b.final_stable)

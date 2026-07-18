@@ -66,7 +66,11 @@ evaluates them deterministically and reports hits (Layer-2 defines, Layer-1 comp
   generically via `requiredCredentials`). Trade-only API keys. Testnet supported.
 - **Account:** multiple named **auth accounts** (`gh`-style), one active at a time, overridable
   with `--account <slug>` (`CCB_ACCOUNT`; legacy `CCB_PROFILE` still honored). An account owns its
-  exchange + testnet + credentials, plus its own isolated book (see per-account data dirs, I-8).
+  exchange + testnet + credentials, plus its own isolated book (see per-account data dirs, I-8). A
+  **paper account** (`auth login --paper`, name via `--account`; I-18/I-19) is the same shape with a `paper` flag and
+  no credentials: it keeps a real exchange id for **public** market data but simulates balances/orders
+  in a per-account book, so every live command runs against it unchanged (a live-execution rehearsal,
+  not a backtest — see [`paper-account.md`](paper-account.md)).
 - **Credentials:** managed by `auth login`; secrets default to the OS **keyring** (metadata-only
   `auth.json`), with a best-effort `0600` plaintext file fallback (`--no-keyring`/`CCB_AUTH_BACKEND`).
   Legacy `CCB_API_KEY`/`CCB_API_SECRET` env vars remain a no-account fallback for CI.
@@ -85,6 +89,8 @@ evaluates them deterministically and reports hits (Layer-2 defines, Layer-1 comp
 | `enums/` | `OrderSide`, `SkipReason`, `OutputFormat` |
 | `models/` | `PairConfig`, `AssetBalance`, `PairSnapshot`, `ProposedOrder`, `RebalanceDecision`, `RebalanceState`, `HistoryEvent`, `ExecutionResult` (frozen+slots) |
 | `stores/exchange.py` | ONLY network code: thin ccxt wrapper (sandbox toggle, timeout); bounded retries of transient failures on idempotent calls (reads + cancel; placement never auto-retries); + `fetch_ohlcv` |
+| `stores/paper_exchange.py` | drop-in `ExchangeStore` for a paper account: real public prices (via a wrapped `ExchangeStore`) + a simulated book; reconcile-driven fills (a resting limit fills once the live ticker crosses it) |
+| `stores/paper_book.py` | persistent `paper_book.json` — a paper account's simulated balances + orders + id counter (atomic write, no network) |
 | `stores/portfolio_store.py` | read/write `portfolio.json` (pair CRUD + validation); + entry/target-set baselines |
 | `stores/state_store.py` | read/write `state.json`; append `history.jsonl` |
 | `stores/market_cache.py` | cached OHLCV under `~/.ccbalancer/ohlcv/`; TTL/staleness, offline fallback |
@@ -191,8 +197,9 @@ what makes it deterministic and testable without hitting an exchange.
 - **write** (mutate state / place orders / fetch data; dry-run by default where it places orders,
   guarded): `rebalance` · `cancel` · `reconcile` (book real fills; places no orders) ·
   `pair (list/add/set/remove)` · `indicator set` · `flag (add/list/remove)` · `config (show/init)` ·
-  `auth (login/logout/list/use/status/whoami)` · `simulation fetch` (network → data store) ·
-  `simulation run` (local backtest, compute only)
+  `auth (login/logout/list/use/status/whoami)` · `paper reset` (re-seed a paper book) ·
+  `simulation fetch` (network → data store) ·
+  `simulation run` (local backtest, compute only; `--targets` replays a moving target schedule)
 - **audit** (local logs only, no network, no side effects): `decisions` · `history` ·
   `performance --history` · `export` · `simulation report`
 

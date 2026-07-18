@@ -87,6 +87,49 @@ def test_run_text_output(appdir, monkeypatch, tmp_path, capsys):
     assert 'BTC/USDT' in out and 'backtest' in out and 'ledger:' in out
 
 
+def _inject_flat(monkeypatch, tmp_path) -> SimulationStore:
+    '''Four flat bars at 100 so a scheduled target flip yields a BUY then a SELL.'''
+    store = SimulationStore(tmp_path / 'simulation')
+    store.append('binance', 'BTC/USDT', '1d', [_candle(i, 100, 100, 100, 100) for i in range(4)])
+    manager = SimulationRunManager(store, RebalanceManager(quote_sanity_pct=15.0, limit_offset_pct=0.0, min_interval_hours=0))
+    monkeypatch.setattr(cli, '_simulation_run_manager', lambda config: manager)
+    return store
+
+
+def _run_json(capsys, *extra):
+    base = ['simulation', 'run', 'BTC/USDT', '--timeframe', '1d', '--start', '2022-09-01',
+            '--end', '2022-12-01', '--exchange', 'binance', '--fee-rate', '0', '--json']
+    code = cli.main(base + list(extra))
+    return code, json.loads(capsys.readouterr().out)
+
+
+def test_run_targets_schedule_changes_fills_and_run_id(appdir, monkeypatch, tmp_path, capsys):
+    _configure_pair(appdir)
+    _inject_flat(monkeypatch, tmp_path)
+    schedule = tmp_path / 'schedule.jsonl'
+    schedule.write_text('{"date": "2022-09-03", "target_volatile_pct": 0.0}\n', encoding='utf-8')
+
+    static_code, static = _run_json(capsys)
+    sched_code, scheduled = _run_json(capsys, '--targets', str(schedule))
+
+    assert static_code == sched_code == int(ExitCode.OK)
+    assert static['fills'] == 1                       # BUY only
+    assert scheduled['fills'] == 2                     # BUY then a scheduled SELL
+    assert scheduled['run_id'] != static['run_id']     # schedule folded into the id
+    assert scheduled['schema_version'] == SCHEMA_VERSION
+
+
+def test_run_invalid_targets_file_exits_config_error(appdir, monkeypatch, tmp_path, capsys):
+    _configure_pair(appdir)
+    _inject_flat(monkeypatch, tmp_path)
+    bad = tmp_path / 'bad.jsonl'
+    bad.write_text('{"date": "2022-09-01", "target_volatile_pct": 250.0}\n', encoding='utf-8')
+
+    code = cli.main(['simulation', 'run', 'BTC/USDT', '--timeframe', '1d', '--start', '2022-09-01',
+                     '--end', '2022-12-01', '--exchange', 'binance', '--targets', str(bad), '--json'])
+    assert code == int(ExitCode.CONFIG_ERROR)
+
+
 def test_run_fill_timeframe_passes_through(appdir, monkeypatch, tmp_path, capsys):
     _configure_pair(appdir)
     store = _inject(monkeypatch, tmp_path)

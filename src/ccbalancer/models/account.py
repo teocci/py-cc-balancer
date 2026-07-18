@@ -30,6 +30,9 @@ class Account:
         account_ref: Best-effort hashed exchange account id captured online at
             login; used to recognize the same real account across logout/re-login
             and to guard credential rotation. ``None`` when uncaptured.
+        paper: Whether this is a paper (simulated-exchange) account. A paper
+            account needs no credentials; ``exchange`` names the real venue whose
+            public market data drives its simulated book.
     '''
 
     name: str
@@ -40,3 +43,4 @@ class Account:
     password: str | None = None
     id: str | None = None
     account_ref: str | None = None
+    paper: bool = False

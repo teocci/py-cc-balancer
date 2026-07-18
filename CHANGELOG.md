@@ -6,6 +6,31 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-19
+
+dynamic brain — external-target backtest + paper account
+
+### Added
+- I-17: `simulation run --targets schedule.jsonl` replays a moving target ratio — a forward-filled
+  step function of `target_volatile_pct` (JSONL `{"date","target_volatile_pct"}` per line, ascending)
+  — instead of the pair's single static target, so an external brain can backtest a de-risking (or
+  re-risking) ratio over a cycle while the CLI keeps applying its own band / min-cost / fee mechanics
+  at each bar. The pure `RebalanceManager.decide` is reused unchanged (a per-bar `PairConfig` is
+  derived); the schedule is validated on load (targets in `[0,100]`, dates strictly increasing) and
+  folded into the run's determinism digest and `run.json` (a different schedule → a distinct `run_id`).
+- I-18: paper (simulated-exchange) backend — `stores/paper_exchange.py` (`PaperExchangeStore`) mirrors
+  the `ExchangeStore` surface, reading **real public** prices/markets/OHLCV through a wrapped real
+  store while simulating balances and orders in a persistent per-account book
+  (`stores/paper_book.py`, `paper_book.json`). Fills are reconcile-driven: a maker limit rests and
+  fills at its limit once the live ticker crosses it (with a flat maker fee), reported through the same
+  `fetch_order` contract the unchanged `ReconciliationManager` books from.
+- I-19: paper accounts — `ccbalancer auth login --paper --exchange <venue>` creates a credential-free
+  account (name via `--account`, default `paper`) whose real venue supplies public prices and whose
+  balances/orders are simulated; `--paper-capital`/`--paper-quote` seed the book. Every live command
+  (`status`/`plan`/`rebalance --execute --confirm`/`orders`/`reconcile`/`performance`) runs against
+  it unchanged via `--account`, exercising the real confirm-token → write-ahead → reconcile plumbing
+  with no real money. `ccbalancer paper reset` re-seeds the book. See `docs/paper-account.md`.
+
 ## [0.5.1] - 2026-07-19
 
 live order-status reconciliation — book only real fills, never on submission (F-6)

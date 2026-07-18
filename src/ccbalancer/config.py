@@ -34,6 +34,7 @@ __all__ = [
     'AppConfig',
     'load_config',
     'resolve_app_dir',
+    'account_data_dir',
     'discover_config_path',
     'resolve_login_testnet',
     'masked_summary',
@@ -127,6 +128,7 @@ class AppConfig:
         safety: Execution safety guardrails.
         account: Name of the resolved auth account, or ``None`` (legacy env path).
         password: Resolved passphrase for venues that require one (e.g. OKX), else ``None``.
+        paper: Whether the resolved account is a paper (simulated-exchange) account.
     '''
 
     exchange: str
@@ -153,6 +155,7 @@ class AppConfig:
     indicators: IndicatorSettings = field(default_factory=IndicatorSettings)
     account: str | None = None
     password: str | None = None
+    paper: bool = False
 
 
 def resolve_app_dir() -> Path:
@@ -247,6 +250,7 @@ def load_config(
         indicators=IndicatorSettings(registry.resolve(read_indicator_overrides(indicators_path))),
         account=account.name if account else None,
         password=account.password if account else os.getenv(c.ENV_PASSPHRASE),
+        paper=account.paper if account else False,
     )
 
 
@@ -283,10 +287,19 @@ _BOOK_FILENAMES = (
 )
 
 
-def _account_data_dir(app_dir: Path, account: Account | None) -> Path:
-    '''Return the per-account data directory (or the default scope when none).'''
+def account_data_dir(app_dir: Path, account: Account | None) -> Path:
+    '''Return the per-account data directory (or the default scope when none).
+
+    Keyed by the account's stable ``id`` so an account's book is never stranded by
+    a rename or credential rotation; the no-account env path uses the default scope.
+    '''
     scope = account.id if (account and account.id) else c.DEFAULT_ACCOUNT_SCOPE
     return app_dir / c.ACCOUNTS_DIRNAME / scope
+
+
+def _account_data_dir(app_dir: Path, account: Account | None) -> Path:
+    '''Internal alias for :func:`account_data_dir` (kept for existing call sites).'''
+    return account_data_dir(app_dir, account)
 
 
 def _migrate_legacy_book(app_dir: Path, data_dir: Path) -> None:
@@ -350,6 +363,8 @@ def require_credentials(config: AppConfig) -> tuple[str, str]:
     Raises:
         ConfigError: If the key, secret, or a required passphrase is missing.
     '''
+    if config.paper:
+        return '', ''  # a paper account authenticates against no real venue
     if not config.api_key or not config.api_secret:
         raise ConfigError(
             'Missing API credentials; add an account with `ccbalancer auth login` or set '
@@ -394,6 +409,7 @@ def masked_summary(config: AppConfig) -> dict[str, object]:
             'kill_switch_path': str(config.safety.kill_switch_path),
         },
         'account': config.account,
+        'paper': config.paper,
         'api_key': _mask(config.api_key),
         'api_secret': _mask(config.api_secret),
         'password': _mask(config.password),

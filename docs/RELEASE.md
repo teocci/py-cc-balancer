@@ -7,6 +7,7 @@ on Win/Linux/macOS, publish portable zips). Written by `phase-complete` (Part B)
 
 | Release | Date | Phases | Theme |
 |---------|------|--------|-------|
+| v0.6.0 | 2026-07-19 | P-23, P-24, P-25 | dynamic brain — external-target backtest + paper account |
 | v0.5.1 | 2026-07-19 | P-22 | live order-status reconciliation — book only real fills, nev |
 | v0.5.0 | 2026-07-18 | P-20, P-21 | backtest sub-daily timeframes + Binance REST fallback, multi |
 | v0.4.0 | 2026-07-18 | P-17, P-18, P-19 | backtest engine — historical data foundation, deterministic  |

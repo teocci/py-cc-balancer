@@ -1,9 +1,10 @@
 # PROGRESS
 
-**Current version:** 0.5.1
-**Active phase:** `v0.5.1` live order-status reconciliation (F-6) — two-phase booking (write-ahead
-pending store + `reconcile` command + auto-reconcile in `rebalance`); no fill fabricated on submission.
-551 tests. Plan complete — all rows released. See `docs/phases/phase-22.md`, `docs/fixes/F-6.md`.
+**Current version:** 0.6.0
+**Active phase:** `v0.6.0` dynamic brain — external-target backtest (`simulation run --targets`, I-17) +
+paper account (`auth login --paper`, simulated exchange with real public prices, reconcile-driven fills;
+I-18/I-19). 589 tests; paper features live-verified against Binance. Plan complete — all rows released.
+See `docs/phases/phase-23.md`, `phase-24.md`, `phase-25.md`, `docs/paper-account.md`.
 
 ## Phase status
 
@@ -33,6 +34,9 @@ pending store + `reconcile` command + auto-reconcile in `rebalance`); no fill fa
 | 20 | Sub-daily timeframes + Binance fallback fetcher | done |
 | 21 | Backtest docs + live smoke-test runbook | done |
 | 22 | Live order-status reconciliation (F-6) | done |
+| 23 | External-target backtest — simulation run --targets | done |
+| 24 | Paper backend + persistent book | done |
+| 25 | Paper account integration + funding + reset | done |
 
 > **Redefinition (2026-06-18):** the project was re-scoped from a pure rebalancer into an agent
 > decision-support tool (read-only market intelligence + deterministic execution + offline memory).
@@ -41,12 +45,34 @@ pending store + `reconcile` command + auto-reconcile in `rebalance`); no fill fa
 
 ## Next action
 
-**v0.5.1** cut (P-22 / F-6: live order-status reconciliation). **Plan complete — every row released.**
-Next: integrate `fix/f-6-exec-reconciliation` to `main` + tag v0.5.1 (release step), then it can be
-pruned along with the merged `feat/sim-backtest`; reset `docs/PLAN.md` to the no-active-plan stub for the
-next plan. Deferred backlog: the multi-timeframe MTFA strategy layer (see `docs/trading/`), MCP server,
-DEX adapter. **F-6 is not yet live-verified** — run the capped `docs/live-smoke-test.md` on a real venue
-before trusting live execution.
+**v0.6.0** bookkeeping cut on `feat/dynamic-brain` (P-23/P-24/P-25 · I-17/I-18/I-19). **Plan complete —
+every row released.** Next (release step): commit the release, integrate `feat/dynamic-brain` to `main`
+(ff), tag `v0.6.0` on `main`, push `main` + the tag, then reset `docs/PLAN.md` to the no-active-plan stub.
+Deferred backlog: the target-only backtest's higher-fidelity sibling `simulation replay --decisions`
+(directed fill-engine, ①b — build only if `--targets` proves insufficient), the multi-timeframe MTFA
+strategy layer (see `docs/trading/`), MCP server, DEX adapter.
+
+> Phase 25 (done): paper account integration + funding + reset (I-19). `Account`/`AppConfig` gained a
+> `paper` flag (persisted by both auth backends, credential-exempt in `require_credentials`);
+> `auth login --paper` creates a credential-free account and seeds its book (`--paper-capital`/
+> `--paper-quote`), the real `--exchange` supplying public prices. `_exchange_store`/
+> `_account_exchange_store` route to the `PaperExchangeStore` (shared `_paper_exchange_store`,
+> `config.account_data_dir` now public); a new `paper reset` re-seeds the book. Every live command runs
+> unchanged via `--account`. Live-verified against Binance public prices end to end. See
+> `docs/phases/phase-25.md`, `docs/improvements/I-19.md`, `docs/paper-account.md`.
+
+> Phase 24 (done): paper backend + persistent book (I-18). New `stores/paper_book.py` (simulated
+> balances/orders/id counter, atomic `paper_book.json`, `locked()` reservations) and
+> `stores/paper_exchange.py` (`PaperExchangeStore` mirroring the `ExchangeStore` surface: real public
+> market data via a wrapped store, a simulated book, reconcile-driven fills — a resting maker limit
+> fills at its limit once the live ticker crosses it, with a flat fee, idempotently). Books through the
+> unchanged `ReconciliationManager`. 13 unit tests. See `docs/phases/phase-24.md`, `docs/improvements/I-18.md`.
+
+> Phase 23 (done): external-target backtest (I-17). `simulation run --targets schedule.jsonl` replays a
+> forward-filled target step function (new `stores/target_schedule.py`: load/validate/bisect-lookup/
+> digest) instead of the pair's static target — a per-bar `PairConfig` is derived so the pure
+> `RebalanceManager.decide` is reused unchanged. The schedule is folded into the run's determinism digest
+> and `run.json`. See `docs/phases/phase-23.md`, `docs/improvements/I-17.md`, `docs/backtest.md`.
 
 > Phase 22 (done): live order-status reconciliation (F-6). Live `rebalance --execute` no longer books a
 > fabricated full fill at submission. Placement is recorded write-ahead in a new per-account

@@ -18,10 +18,11 @@ from __future__ import annotations
 import bisect
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from ccbalancer import constants as c
+from ccbalancer.constants import RATIO_TOTAL_PCT
 from ccbalancer.enums.side import OrderSide
 from ccbalancer.exceptions import OrderRejectedError, StateError
 from ccbalancer.models import Fill, PairConfig, ProposedOrder, SimRunResult
@@ -33,6 +34,7 @@ from ccbalancer.utils.timeutil import ms_to_iso
 if TYPE_CHECKING:
     from ccbalancer.managers.rebalance_manager import RebalanceManager
     from ccbalancer.stores.simulation_store import SimulationStore
+    from ccbalancer.stores.target_schedule import TargetSchedule
 
 __all__ = ['ReplayParams', 'ReplayOutcome', 'SimulationRunManager', 'replay', 'validate_order']
 
@@ -111,6 +113,7 @@ def replay(
     rebalancer: RebalanceManager,
     params: ReplayParams,
     fill_candles: list[list[float]] | None = None,
+    schedule: TargetSchedule | None = None,
 ) -> ReplayOutcome:
     '''Replay ``candles`` for ``pair`` and return the fills and final balance.
 
@@ -120,6 +123,11 @@ def replay(
     against those finer bars within the next decision interval — filling at the
     first crossing finer bar's timestamp — for higher-resolution fills. Either way
     an order never resolves on its own decision bar (no look-ahead).
+
+    When ``schedule`` is supplied, the volatile-side target is taken from it per
+    decision bar (a forward-filled step function); before its first step, and when
+    no schedule is given, the pair's configured target applies. The pure
+    :class:`RebalanceManager` is unchanged — a per-bar ``PairConfig`` is derived.
     '''
     balance = _Balance(base=0.0, stable=params.capital)
     resting: ProposedOrder | None = None
@@ -131,18 +139,19 @@ def replay(
     prev_open: int | None = None
     for candle in candles:
         open_ms = int(candle[CANDLE_TIME])
+        bar_pair = _target_pair(pair, schedule, open_ms)
         # 1. Resolve the order decided on the *previous* bar within this bar's span
         #    (never the decision bar itself → no look-ahead).
         if resting is not None:
             interval_ms = open_ms - prev_open if prev_open is not None else 0
-            fill = _resolve(resting, candle, interval_ms, fine, balance, params, pair, len(fills))
+            fill = _resolve(resting, candle, interval_ms, fine, balance, params, bar_pair, len(fills))
             if fill is not None:
                 fills.append(fill)
                 last_rebalance_at = fill.ts
             resting = None  # filled, or cancelled for re-quote
         # 2. Decide on this closed candle, then place/validate the new order.
         decision = rebalancer.decide(
-            pair, _snapshot(pair, balance, candle, params, last_rebalance_at),
+            bar_pair, _snapshot(bar_pair, balance, candle, params, last_rebalance_at),
             now=ms_to_iso(open_ms),
         )
         order = decision.proposed_order if decision.rebalance else None
@@ -156,6 +165,21 @@ def replay(
             rejects += 1
             resting = None
     return ReplayOutcome(fills, balance.base, balance.stable, orders_placed, rejects)
+
+
+def _target_pair(pair: PairConfig, schedule: TargetSchedule | None, open_ms: int) -> PairConfig:
+    '''Return ``pair`` with the scheduled target for ``open_ms``, or unchanged.
+
+    Before the schedule's first step (or with no schedule) the pair's configured
+    target stands; otherwise a per-bar :class:`PairConfig` carries the step value,
+    with the stable side set so the ratio still sums to 100.
+    '''
+    if schedule is None:
+        return pair
+    target = schedule.target_at(open_ms)
+    if target is None or target == pair.target_volatile_pct:
+        return pair
+    return replace(pair, target_volatile_pct=target, target_stable_pct=RATIO_TOTAL_PCT - target)
 
 
 class _FineIndex:
@@ -279,12 +303,15 @@ class SimulationRunManager:
         pair: PairConfig,
         params: ReplayParams,
         fill_timeframe: str | None = None,
+        schedule: TargetSchedule | None = None,
     ) -> SimRunResult:
         '''Replay the stored candles in ``[start_ms, end_ms)`` and write the run.
 
         When ``fill_timeframe`` is given (and differs from ``timeframe``), those
         finer candles resolve fills within each decision interval; otherwise fills
-        resolve on the next decision bar.
+        resolve on the next decision bar. When ``schedule`` is given, the volatile
+        target follows it per bar (forward-filled) rather than the pair's static
+        target.
 
         Raises:
             StateError: If no candles are stored for the decision or fill
@@ -297,10 +324,10 @@ class SimulationRunManager:
             )
         fill_candles = self._fill_candles(exchange_id, symbol, timeframe, fill_timeframe,
                                           start_ms, end_ms)
-        outcome = replay(candles, pair, self.rebalancer, params, fill_candles)
-        run_id = _run_id(symbol, timeframe, fill_timeframe, start_ms, end_ms, pair, params)
+        outcome = replay(candles, pair, self.rebalancer, params, fill_candles, schedule)
+        run_id = _run_id(symbol, timeframe, fill_timeframe, start_ms, end_ms, pair, params, schedule)
         ledger_path = self._write_run(run_id, exchange_id, symbol, timeframe, fill_timeframe,
-                                      start_ms, end_ms, pair, params, outcome, candles)
+                                      start_ms, end_ms, pair, params, outcome, candles, schedule)
         last_close = float(candles[-1][_CLOSE])
         return SimRunResult(
             symbol=symbol,
@@ -349,7 +376,7 @@ class SimulationRunManager:
         return candles
 
     def _write_run(self, run_id, exchange_id, symbol, timeframe, fill_timeframe, start_ms, end_ms,
-                   pair, params, outcome, candles):
+                   pair, params, outcome, candles, schedule=None):
         '''Write a fresh sim ledger + params file; return the ledger path.'''
         run_dir = self.store.root / c.SIM_RUNS_DIRNAME / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -372,6 +399,10 @@ class SimulationRunManager:
             'amount_precision': params.amount_precision,
             'min_cost': params.min_cost,
             'target_volatile_pct': pair.target_volatile_pct,
+            # The moving target overrides the static one when a schedule is active;
+            # record its digest + step count so the run's provenance is auditable.
+            'target_schedule_digest': schedule.digest() if schedule is not None else None,
+            'target_schedule_steps': len(schedule.steps) if schedule is not None else 0,
             'band_pct': pair.band_pct,
             'min_notional': pair.min_notional,
             'bars': len(candles),
@@ -389,12 +420,13 @@ class SimulationRunManager:
 
 def _run_id(
     symbol: str, timeframe: str, fill_timeframe: str | None, start_ms: int, end_ms: int,
-    pair: PairConfig, params: ReplayParams,
+    pair: PairConfig, params: ReplayParams, schedule: TargetSchedule | None = None,
 ) -> str:
     '''Deterministic run id: a short digest of every input that shapes the ledger.'''
     canonical = '|'.join(str(part) for part in (
         symbol, timeframe, fill_timeframe, start_ms, end_ms,
         params.capital, params.fee_rate, params.amount_precision, params.min_cost,
         pair.target_volatile_pct, pair.band_pct, pair.min_notional, pair.max_trade_notional,
+        schedule.digest() if schedule is not None else '',
     ))
     return hashlib.sha256(canonical.encode('utf-8')).hexdigest()[:12]

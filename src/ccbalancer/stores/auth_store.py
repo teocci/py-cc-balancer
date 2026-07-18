@@ -90,6 +90,7 @@ class FileSecretBackend:
             'account_ref': account.account_ref,
             'exchange': account.exchange,
             'testnet': account.testnet,
+            'paper': account.paper,
             'api_key': account.api_key,
             'api_secret': account.api_secret,
             'password': account.password,
@@ -127,6 +128,7 @@ class KeyringSecretBackend:
             'account_ref': account.account_ref,
             'exchange': account.exchange,
             'testnet': account.testnet,
+            'paper': account.paper,
         }
 
     def hydrate(self, entry: dict[str, object]) -> Account:
@@ -351,6 +353,7 @@ def _account_from_meta(
         password=password if password is None else str(password),
         id=str(entry['id']) if entry.get('id') else None,
         account_ref=str(entry['account_ref']) if entry.get('account_ref') else None,
+        paper=bool(entry.get('paper', False)),
     )
 
 

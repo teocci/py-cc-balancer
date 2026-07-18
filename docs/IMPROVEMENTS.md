@@ -20,3 +20,6 @@ Enhancement backlog (non-blocking, deferred). Promote to a phase when scheduled.
 | [I-14](improvements/I-14.md) | Feed the sim ledger to PerformanceManager; emit a JSON/text report with a per-year breakdown. | ✅ Done in v0.4.0. |
 | [I-15](improvements/I-15.md) | stores/history_fetch.py Binance REST backfill for LTF, multi-timeframe alignment, volume handling. | ✅ Done in v0.5.0. |
 | [I-16](improvements/I-16.md) | Document the engine, its false-confidence limits, and a capped live smoke-test procedure. | ✅ Done in v0.5.0. |
+| [I-17](improvements/I-17.md) | Backtest a moving target ratio via a forward-filled JSONL schedule (`{date, target_volatile_pct}`). | ✅ Done in v0.6.0. |
+| [I-18](improvements/I-18.md) | Simulated exchange backend (persistent book + real public prices, reconcile-driven fills) mirroring the ExchangeStore surface. | ✅ Done in v0.6.0. |
+| [I-19](improvements/I-19.md) | `auth login --paper` creates a simulated account every live command runs against unchanged; `paper reset` re-seeds it. | ✅ Done in v0.6.0. |

@@ -45,6 +45,10 @@ __all__ = [
     'SIM_DEFAULT_FEE_RATE',
     'SIM_DEFAULT_AMOUNT_PRECISION',
     'SIM_DEFAULT_MIN_COST',
+    'PAPER_BOOK_FILENAME',
+    'DEFAULT_PAPER_CAPITAL',
+    'DEFAULT_PAPER_QUOTE',
+    'DEFAULT_PAPER_FEE_RATE',
     'ACCOUNTS_DIRNAME',
     'DEFAULT_ACCOUNT_SCOPE',
     'KILL_SWITCH_FILENAME',
@@ -185,6 +189,13 @@ SIM_DEFAULT_CAPITAL = 10000.0
 SIM_DEFAULT_FEE_RATE = 0.001
 SIM_DEFAULT_AMOUNT_PRECISION = 8
 SIM_DEFAULT_MIN_COST = 0.0
+# Paper (simulated-exchange) account: the per-account book file holding the
+# simulated balances + resting orders, the initial all-stable capital seeded at
+# `auth login --paper`, and the maker fee applied to each simulated fill.
+PAPER_BOOK_FILENAME = 'paper_book.json'
+DEFAULT_PAPER_CAPITAL = 10000.0
+DEFAULT_PAPER_QUOTE = 'USDT'
+DEFAULT_PAPER_FEE_RATE = 0.001
 # Per-account books live under <app_dir>/accounts/<account-id>/. Each account's
 # portfolio/state/ledger/decisions/flags are isolated by its stable id; the
 # no-account env-credential path uses the 'default' scope.
