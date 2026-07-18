@@ -14,6 +14,8 @@ class SimRunResult:
     Attributes:
         symbol: The pair replayed, as ``BASE/QUOTE``.
         timeframe: Decision timeframe driving the replay (e.g. ``'1d'``).
+        fill_timeframe: Finer timeframe resolving fills within each decision
+            interval, or ``None`` when fills resolve on the decision bar itself.
         run_id: Deterministic id (hash of the run inputs); names the run directory.
         start_ms: First candle open time replayed (epoch ms).
         end_ms: Exclusive end of the replayed range (epoch ms).
@@ -31,6 +33,7 @@ class SimRunResult:
 
     symbol: str
     timeframe: str
+    fill_timeframe: str | None
     run_id: str
     start_ms: int
     end_ms: int

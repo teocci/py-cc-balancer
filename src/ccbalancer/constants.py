@@ -28,6 +28,14 @@ __all__ = [
     'SIM_MANIFEST_FILENAME',
     'SIM_FETCH_PAGE_LIMIT',
     'SIM_DEFAULT_TIMEFRAMES',
+    'SIM_LTF_TIMEFRAMES',
+    'BINANCE_KLINES_URL',
+    'BINANCE_KLINES_LIMIT',
+    'BINANCE_KLINES_RETRY_STATUS',
+    'BINANCE_KLINES_BLOCKED_STATUS',
+    'BINANCE_ARCHIVE_URL',
+    'BINANCE_KLINES_RETRIES',
+    'BINANCE_KLINES_BACKOFF_MS',
     'SIM_RUNS_DIRNAME',
     'SIM_LEDGER_FILENAME',
     'SIM_RUN_FILENAME',
@@ -137,9 +145,29 @@ SIM_OHLCV_DIRNAME = 'ohlcv'
 SIM_MANIFEST_FILENAME = 'manifest.json'
 # ccxt page size for the paginated range fetch (venue max is typically 1000).
 SIM_FETCH_PAGE_LIMIT = 1000
-# Timeframes fetched by default for a full-cycle backtest (cheap to paginate);
-# sub-daily (1m/5m) is deferred to a later phase behind a REST-klines fetcher.
-SIM_DEFAULT_TIMEFRAMES = ('1h', '4h', '1d')
+# Timeframes fetched by default for a full-cycle backtest. Includes 15m — the
+# coarsest execution timeframe (DESIGN decision_timeframes = 1m/5m/15m) — which
+# ccxt paginates comfortably; deeper 1m/5m is opt-in via --timeframe and routes to
+# the Binance REST klines fallback below.
+SIM_DEFAULT_TIMEFRAMES = ('15m', '1h', '4h', '1d')
+# Sub-daily timeframes routed to the Binance REST klines fallback instead of the
+# ccxt pager, where candle volume makes ccxt pagination impractical. Higher
+# timeframes — including 15m — stay on ccxt fetch_ohlcv_range (I-12).
+SIM_LTF_TIMEFRAMES = ('1m', '5m')
+# Binance public REST klines endpoint — no API key (public market data). Used only
+# by stores/history_fetch.py for deep 1m/5m backfill; managers never do network.
+BINANCE_KLINES_URL = 'https://api.binance.com/api/v3/klines'
+# Venue page cap for /api/v3/klines (max 1000 rows/call, mirrors the ccxt pager).
+BINANCE_KLINES_LIMIT = 1000
+# HTTP statuses worth a backoff-and-retry: 429 rate-limit, 418 IP auto-ban.
+BINANCE_KLINES_RETRY_STATUS = (429, 418)
+# HTTP 451 = legal block on the API host; the documented fallback is the bulk
+# archive at data.binance.vision, surfaced in the raised error.
+BINANCE_KLINES_BLOCKED_STATUS = 451
+BINANCE_ARCHIVE_URL = 'https://data.binance.vision'
+# Retry budget and base backoff (ms, doubled each attempt) for the klines fetcher.
+BINANCE_KLINES_RETRIES = 5
+BINANCE_KLINES_BACKOFF_MS = 500
 # Backtest run artifacts under the simulation tree: one directory per run (keyed by
 # a deterministic hash of the run inputs) holding the isolated sim ledger + params.
 SIM_RUNS_DIRNAME = 'runs'

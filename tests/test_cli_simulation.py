@@ -59,8 +59,9 @@ def test_fetch_lowercase_symbol_is_normalized(appdir, monkeypatch, tmp_path, cap
     assert json.loads(capsys.readouterr().out)['symbol'] == 'BTC/USDT'
 
 
-def test_fetch_defaults_to_1h_4h_1d(appdir, monkeypatch, tmp_path, capsys):
+def test_fetch_defaults_to_15m_1h_4h_1d(appdir, monkeypatch, tmp_path, capsys):
     exchange = FakeExchangeStore(exchange_id='binance', ohlcv={
+        ('BTC/USDT', '15m'): [[_START, 10.0, 12.0, 9.0, 11.0, 100.0]],
         ('BTC/USDT', '1h'): _hourly(3),
         ('BTC/USDT', '4h'): [[_START, 10.0, 12.0, 9.0, 11.0, 100.0]],
         ('BTC/USDT', '1d'): [[_START, 10.0, 12.0, 9.0, 11.0, 100.0]],
@@ -70,7 +71,7 @@ def test_fetch_defaults_to_1h_4h_1d(appdir, monkeypatch, tmp_path, capsys):
     cli.main(['simulation', 'fetch', 'BTC/USDT', '--start', '2022-09-01', '--end', '2022-09-05', '--json'])
     payload = json.loads(capsys.readouterr().out)
 
-    assert [f['timeframe'] for f in payload['timeframes']] == ['1h', '4h', '1d']
+    assert [f['timeframe'] for f in payload['timeframes']] == ['15m', '1h', '4h', '1d']
 
 
 def test_fetch_resume_is_up_to_date_on_second_run(appdir, monkeypatch, tmp_path, capsys):

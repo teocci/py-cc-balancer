@@ -15,6 +15,7 @@ Network and clock never enter here; candles come from the offline simulation sto
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 from dataclasses import dataclass
@@ -109,28 +110,43 @@ def replay(
     pair: PairConfig,
     rebalancer: RebalanceManager,
     params: ReplayParams,
+    fill_candles: list[list[float]] | None = None,
 ) -> ReplayOutcome:
-    '''Replay ``candles`` for ``pair`` and return the fills and final balance.'''
+    '''Replay ``candles`` for ``pair`` and return the fills and final balance.
+
+    Decisions are made on each closed ``candles`` bar (the decision timeframe). By
+    default a resting order resolves against the *next* decision bar. When
+    ``fill_candles`` (a finer timeframe) is supplied, the order instead resolves
+    against those finer bars within the next decision interval — filling at the
+    first crossing finer bar's timestamp — for higher-resolution fills. Either way
+    an order never resolves on its own decision bar (no look-ahead).
+    '''
     balance = _Balance(base=0.0, stable=params.capital)
     resting: ProposedOrder | None = None
     last_rebalance_at: str | None = None
     fills: list[Fill] = []
     orders_placed = 0
     rejects = 0
+    fine = _FineIndex(fill_candles) if fill_candles is not None else None
+    prev_open: int | None = None
     for candle in candles:
-        # 1. Resolve the order decided on the *previous* bar against this one
-        #    (next-bar resolution — never the decision bar → no look-ahead).
+        open_ms = int(candle[CANDLE_TIME])
+        # 1. Resolve the order decided on the *previous* bar within this bar's span
+        #    (never the decision bar itself → no look-ahead).
         if resting is not None:
-            if _crosses(resting, candle):
-                fills.append(_apply_fill(balance, resting, candle, params, pair, len(fills)))
-                last_rebalance_at = fills[-1].ts
+            interval_ms = open_ms - prev_open if prev_open is not None else 0
+            fill = _resolve(resting, candle, interval_ms, fine, balance, params, pair, len(fills))
+            if fill is not None:
+                fills.append(fill)
+                last_rebalance_at = fill.ts
             resting = None  # filled, or cancelled for re-quote
         # 2. Decide on this closed candle, then place/validate the new order.
         decision = rebalancer.decide(
             pair, _snapshot(pair, balance, candle, params, last_rebalance_at),
-            now=ms_to_iso(int(candle[CANDLE_TIME])),
+            now=ms_to_iso(open_ms),
         )
         order = decision.proposed_order if decision.rebalance else None
+        prev_open = open_ms
         if order is None:
             continue
         orders_placed += 1
@@ -140,6 +156,49 @@ def replay(
             rejects += 1
             resting = None
     return ReplayOutcome(fills, balance.base, balance.stable, orders_placed, rejects)
+
+
+class _FineIndex:
+    '''Bisect index over finer-timeframe candles for windowed fill resolution.'''
+
+    __slots__ = ('_candles', '_opens')
+
+    def __init__(self, candles: list[list[float]]) -> None:
+        self._candles = candles
+        self._opens = [int(candle[CANDLE_TIME]) for candle in candles]
+
+    def window(self, start_ms: int, end_ms: int) -> list[list[float]]:
+        '''Return the finer candles with open in ``[start_ms, end_ms)``.'''
+        lo = bisect.bisect_left(self._opens, start_ms)
+        hi = bisect.bisect_left(self._opens, end_ms)
+        return self._candles[lo:hi]
+
+
+def _resolve(
+    order: ProposedOrder,
+    decision_candle: list[float],
+    interval_ms: int,
+    fine: _FineIndex | None,
+    balance: _Balance,
+    params: ReplayParams,
+    pair: PairConfig,
+    seq: int,
+) -> Fill | None:
+    '''Resolve a resting order and return the Fill, or None if it does not cross.
+
+    With no finer series the whole decision bar is the resolution window (fills at
+    its open). Otherwise the first crossing finer bar within the decision interval
+    fills, at that finer bar's timestamp.
+    '''
+    if fine is None:
+        if _crosses(order, decision_candle):
+            return _apply_fill(balance, order, decision_candle, params, pair, seq)
+        return None
+    start = int(decision_candle[CANDLE_TIME])
+    for candle in fine.window(start, start + interval_ms):
+        if _crosses(order, candle):
+            return _apply_fill(balance, order, candle, params, pair, seq)
+    return None
 
 
 def _snapshot(pair, balance, candle, params, last_rebalance_at):
@@ -219,28 +278,34 @@ class SimulationRunManager:
         end_ms: int,
         pair: PairConfig,
         params: ReplayParams,
+        fill_timeframe: str | None = None,
     ) -> SimRunResult:
         '''Replay the stored candles in ``[start_ms, end_ms)`` and write the run.
 
+        When ``fill_timeframe`` is given (and differs from ``timeframe``), those
+        finer candles resolve fills within each decision interval; otherwise fills
+        resolve on the next decision bar.
+
         Raises:
-            StateError: If no candles are stored for the range (fetch them first).
+            StateError: If no candles are stored for the decision or fill
+                timeframe over the range (fetch them first).
         '''
-        candles = [
-            candle for candle in self.store.read(exchange_id, symbol, timeframe)
-            if start_ms <= int(candle[CANDLE_TIME]) < end_ms
-        ]
+        candles = self._range_candles(exchange_id, symbol, timeframe, start_ms, end_ms)
         if not candles:
             raise StateError(
                 f'No stored {timeframe} candles for {symbol} in range; run `simulation fetch` first'
             )
-        outcome = replay(candles, pair, self.rebalancer, params)
-        run_id = _run_id(symbol, timeframe, start_ms, end_ms, pair, params)
-        ledger_path = self._write_run(run_id, exchange_id, symbol, timeframe, start_ms, end_ms,
-                                      pair, params, outcome, candles)
+        fill_candles = self._fill_candles(exchange_id, symbol, timeframe, fill_timeframe,
+                                          start_ms, end_ms)
+        outcome = replay(candles, pair, self.rebalancer, params, fill_candles)
+        run_id = _run_id(symbol, timeframe, fill_timeframe, start_ms, end_ms, pair, params)
+        ledger_path = self._write_run(run_id, exchange_id, symbol, timeframe, fill_timeframe,
+                                      start_ms, end_ms, pair, params, outcome, candles)
         last_close = float(candles[-1][_CLOSE])
         return SimRunResult(
             symbol=symbol,
             timeframe=timeframe,
+            fill_timeframe=fill_timeframe,
             run_id=run_id,
             start_ms=start_ms,
             end_ms=end_ms,
@@ -256,7 +321,34 @@ class SimulationRunManager:
             ledger_path=str(ledger_path),
         )
 
-    def _write_run(self, run_id, exchange_id, symbol, timeframe, start_ms, end_ms,
+    def _range_candles(
+        self, exchange_id: str, symbol: str, timeframe: str, start_ms: int, end_ms: int
+    ) -> list[list[float]]:
+        '''Read the stored candles for ``timeframe`` clipped to ``[start_ms, end_ms)``.'''
+        return [
+            candle for candle in self.store.read(exchange_id, symbol, timeframe)
+            if start_ms <= int(candle[CANDLE_TIME]) < end_ms
+        ]
+
+    def _fill_candles(
+        self, exchange_id: str, symbol: str, timeframe: str, fill_timeframe: str | None,
+        start_ms: int, end_ms: int,
+    ) -> list[list[float]] | None:
+        '''Read the finer fill series, or ``None`` when no distinct one is requested.
+
+        Raises:
+            StateError: If the requested fill timeframe has no stored candles.
+        '''
+        if fill_timeframe is None or fill_timeframe == timeframe:
+            return None
+        candles = self._range_candles(exchange_id, symbol, fill_timeframe, start_ms, end_ms)
+        if not candles:
+            raise StateError(
+                f'No stored {fill_timeframe} candles for {symbol} in range; run `simulation fetch` first'
+            )
+        return candles
+
+    def _write_run(self, run_id, exchange_id, symbol, timeframe, fill_timeframe, start_ms, end_ms,
                    pair, params, outcome, candles):
         '''Write a fresh sim ledger + params file; return the ledger path.'''
         run_dir = self.store.root / c.SIM_RUNS_DIRNAME / run_id
@@ -272,6 +364,7 @@ class SimulationRunManager:
             'exchange': exchange_id,
             'symbol': symbol,
             'timeframe': timeframe,
+            'fill_timeframe': fill_timeframe,
             'start_ms': start_ms,
             'end_ms': end_ms,
             'capital': params.capital,
@@ -295,11 +388,12 @@ class SimulationRunManager:
 
 
 def _run_id(
-    symbol: str, timeframe: str, start_ms: int, end_ms: int, pair: PairConfig, params: ReplayParams
+    symbol: str, timeframe: str, fill_timeframe: str | None, start_ms: int, end_ms: int,
+    pair: PairConfig, params: ReplayParams,
 ) -> str:
     '''Deterministic run id: a short digest of every input that shapes the ledger.'''
     canonical = '|'.join(str(part) for part in (
-        symbol, timeframe, start_ms, end_ms,
+        symbol, timeframe, fill_timeframe, start_ms, end_ms,
         params.capital, params.fee_rate, params.amount_precision, params.min_cost,
         pair.target_volatile_pct, pair.band_pct, pair.min_notional, pair.max_trade_notional,
     ))

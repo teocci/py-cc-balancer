@@ -88,3 +88,55 @@ def test_run_id_changes_with_inputs(tmp_path):
     b = manager.run('binance', 'BTC/USDT', '1d', _START, _END, _pair(),
                     ReplayParams(capital=5000.0, fee_rate=0.001, amount_precision=8, min_cost=0.0))
     assert a.run_id != b.run_id
+
+
+_HOUR_MS = 3_600_000
+
+
+def _seed_with_hours(tmp_path) -> SimulationStore:
+    '''Daily decision candles + finer hourly bars for fill resolution.'''
+    store = _seed(tmp_path)  # daily: day0 decides BUY@100
+    # day1 hours: only hour3 dips to 99 (crosses the @100 limit).
+    day1 = _START + _DAY_MS
+    hours = [
+        [day1 + h * _HOUR_MS, 100.0, 101.0, 99.0 if h == 3 else 101.0, 100.0, 10.0]
+        for h in range(5)
+    ]
+    store.append('binance', 'BTC/USDT', '1h', hours)
+    return store
+
+
+def test_run_with_fill_timeframe_resolves_on_finer_bars(tmp_path):
+    from ccbalancer.utils.timeutil import ms_to_iso
+
+    store = _seed_with_hours(tmp_path)
+    result = _manager(store).run(
+        'binance', 'BTC/USDT', '1d', _START, _END, _pair(), _params(), fill_timeframe='1h'
+    )
+
+    assert result.fill_timeframe == '1h'
+    assert result.fills == 1
+    ledger_lines = (store.root / SIM_RUNS_DIRNAME / result.run_id / SIM_LEDGER_FILENAME).read_text(
+        encoding='utf-8'
+    ).splitlines()
+    # Fill stamped at the crossing hour (day1 hour3), not the daily bar open.
+    assert ms_to_iso(_START + _DAY_MS + 3 * _HOUR_MS) in ledger_lines[0]
+
+
+def test_run_id_changes_with_fill_timeframe(tmp_path):
+    store = _seed_with_hours(tmp_path)
+    manager = _manager(store)
+    without = manager.run('binance', 'BTC/USDT', '1d', _START, _END, _pair(), _params())
+    withfill = manager.run(
+        'binance', 'BTC/USDT', '1d', _START, _END, _pair(), _params(), fill_timeframe='1h'
+    )
+    assert without.run_id != withfill.run_id
+    assert without.fill_timeframe is None
+
+
+def test_run_missing_fill_timeframe_raises_state_error(tmp_path):
+    store = _seed(tmp_path)  # only daily candles stored, no 1h
+    with pytest.raises(StateError):
+        _manager(store).run(
+            'binance', 'BTC/USDT', '1d', _START, _END, _pair(), _params(), fill_timeframe='1h'
+        )

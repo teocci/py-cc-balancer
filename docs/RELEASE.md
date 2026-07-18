@@ -7,6 +7,7 @@ on Win/Linux/macOS, publish portable zips). Written by `phase-complete` (Part B)
 
 | Release | Date | Phases | Theme |
 |---------|------|--------|-------|
+| v0.5.0 | 2026-07-18 | P-20, P-21 | backtest sub-daily timeframes + Binance REST fallback, multi |
 | v0.4.0 | 2026-07-18 | P-17, P-18, P-19 | backtest engine — historical data foundation, deterministic  |
 | v0.3.0 | 2026-07-18 | P-15, P-16 | ADX + support/resistance indicators; --help discoverability |
 | v0.2.0 | 2026-07-17 | I-5, I-6, I-7, I-8, F-5 | Account-CLI overhaul: command-scoped flags, `--fields`, `profile`→`account`, per-account isolation |

@@ -40,6 +40,9 @@ def _inject(monkeypatch, tmp_path) -> SimulationStore:
     return store
 
 
+_HOUR_MS = 3_600_000
+
+
 def test_run_json_emits_stable_contract(appdir, monkeypatch, tmp_path, capsys):
     _configure_pair(appdir)
     _inject(monkeypatch, tmp_path)
@@ -82,3 +85,21 @@ def test_run_text_output(appdir, monkeypatch, tmp_path, capsys):
               '--start', '2022-09-01', '--end', '2022-12-01', '--exchange', 'binance'])
     out = capsys.readouterr().out
     assert 'BTC/USDT' in out and 'backtest' in out and 'ledger:' in out
+
+
+def test_run_fill_timeframe_passes_through(appdir, monkeypatch, tmp_path, capsys):
+    _configure_pair(appdir)
+    store = _inject(monkeypatch, tmp_path)
+    # Finer hourly bars over day1; hour3 crosses the @100 BUY limit.
+    day1 = _START + _DAY_MS
+    store.append('binance', 'BTC/USDT', '1h', [
+        [day1 + h * _HOUR_MS, 100.0, 101.0, 99.0 if h == 3 else 101.0, 100.0, 10.0]
+        for h in range(5)
+    ])
+
+    cli.main(['simulation', 'run', 'BTC/USDT', '--timeframe', '1d', '--fill-timeframe', '1h',
+              '--start', '2022-09-01', '--end', '2022-12-01', '--exchange', 'binance', '--json'])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload['fill_timeframe'] == '1h'
+    assert payload['fills'] == 1

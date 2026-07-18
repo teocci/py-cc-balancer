@@ -1,9 +1,9 @@
 # PROGRESS
 
-**Current version:** 0.4.0
-**Active phase:** `v0.4.0` backtest engine — I-12 (historical data foundation), I-13 (deterministic
-replay engine), I-14 (P&L reporting). 506 tests. R3 (P-20 sub-daily + Binance fetcher, P-21 docs)
-remains. See `docs/phases/phase-17.md`…`phase-19.md`, `docs/improvements/I-12.md`…`I-14.md`.
+**Current version:** 0.5.0
+**Active phase:** `v0.5.0` backtest sub-daily + docs — I-15 (sub-daily 1m/5m + Binance REST fallback,
+multi-timeframe fills), I-16 (backtest docs + live smoke-test runbook). 526 tests. Plan complete — all
+rows released. See `docs/phases/phase-20.md`…`phase-21.md`, `docs/improvements/I-15.md`…`I-16.md`.
 
 ## Phase status
 
@@ -30,8 +30,8 @@ remains. See `docs/phases/phase-17.md`…`phase-19.md`, `docs/improvements/I-12.
 | 17 | Backtest data foundation | done |
 | 18 | Backtest replay engine | done |
 | 19 | Backtest reporting | done |
-| 20 | Sub-daily timeframes + Binance fallback fetcher | planned |
-| 21 | Backtest docs + live smoke-test runbook | planned |
+| 20 | Sub-daily timeframes + Binance fallback fetcher | done |
+| 21 | Backtest docs + live smoke-test runbook | done |
 
 > **Redefinition (2026-06-18):** the project was re-scoped from a pure rebalancer into an agent
 > decision-support tool (read-only market intelligence + deterministic execution + offline memory).
@@ -40,10 +40,34 @@ remains. See `docs/phases/phase-17.md`…`phase-19.md`, `docs/improvements/I-12.
 
 ## Next action
 
-`v0.4.0` cut (backtest engine — data foundation + replay + reporting; R2 = P-17/P-18/P-19). Plan
-continues: R3 is **P-20** (sub-daily 1m/5m + Binance REST fallback fetcher, I-15) and **P-21**
-(backtest docs + live smoke-test runbook, I-16) — independent, runnable in parallel. Deferred: the
-multi-timeframe MTFA strategy layer (see `docs/trading/`), MCP server, DEX adapter.
+`v0.5.0` cut (R3 = P-20/P-21: sub-daily timeframes + Binance REST fallback, multi-timeframe fills, and
+honest backtest docs + a capped live smoke-test runbook). **The plan is complete — every row is
+released.** Next: drain the `feat/sim-backtest` branch (it integrates to `main` per release) and reset
+`docs/PLAN.md` to the no-active-plan stub; then scope a new plan. Deferred backlog: the deferred
+live-execution reconciliation fix (F-6), the multi-timeframe MTFA strategy layer (see `docs/trading/`),
+MCP server, DEX adapter.
+
+> Phase 21 (done): backtest docs + live smoke-test runbook (I-16). Docs-only. `DESIGN.md` gained a
+> *Backtest engine (offline)* section (fetch → replay → report, the dedicated replay loop, the
+> network-only-in-stores invariant) with `simulation` added to the command taxonomy; new
+> `docs/backtest.md` documents how to read a result (headline vs per-year, fills/orders/rejects,
+> determinism) and the honest limitations (bar-fill approximation, look-ahead scope, cycle/overfitting,
+> fee realism, gaps + cross-venue provenance) — framing the backtest as strategy research, not
+> execution validation; new `docs/live-smoke-test.md` is a capped live runbook validating the residual
+> risk no backtest removes (auth, real fill, real rejection) with safety rails armed, cross-referencing
+> the deferred [F-6](fixes/F-6.md) execution-reconciliation gap. No code changed; 526 tests. Closes R3
+> (v0.5.0 with P-20). See `docs/phases/phase-21.md`, `docs/improvements/I-16.md`.
+
+> Phase 20 (done): sub-daily timeframes + Binance fallback fetcher (I-15). New
+> `stores/history_fetch.py` (`BinanceHistoryFetch`) is a paginated public Binance `/api/v3/klines`
+> fallback for deep 1m/5m backfill (closed-candles-only, 429/418 backoff, HTTP-451 →
+> `data.binance.vision` archive note); `SimulationManager` routes 1m/5m to it and every other
+> timeframe to the ccxt pager (I-12). The replay engine gained multi-timeframe alignment:
+> `simulation run --fill-timeframe <TF>` resolves fills on a finer series *within each decision
+> interval* (first crossing bar fills at its own timestamp) via a bisect-indexed window — preserving
+> no-look-ahead and determinism; the default single-series path stays byte-identical. `15m` is now a
+> default fetched timeframe. 526 tests. Batched with P-21 in R3 (release deferred until P-21). See
+> `docs/phases/phase-20.md`, `docs/improvements/I-15.md`.
 
 > Phase 19 (done): backtest reporting (I-14). New `simulation report <run_id>` marks a completed run to
 > its final candle close and reports realized/unrealized/total P&L, ROI (vs starting `--capital`), fees,

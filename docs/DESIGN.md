@@ -145,15 +145,45 @@ Ordered guards, first failure wins: `ABNORMAL_PRICE` → `MARKET_UNAVAILABLE` �
 at ask ± `limit_offset_pct`) tagged with `CCB_PREFIX` → persist `state.json` + append `history.jsonl`.
 Idempotent: re-run cancels its own leftovers and re-places.
 
+## Backtest engine (offline)
+
+A three-stage backtest simulator (`simulation` command) for **strategy research**, not execution
+validation — read [`backtest.md`](backtest.md) for how to read results and the honest limitations.
+
+- **Data foundation** (`simulation fetch`, I-12/I-15): downloads historical OHLCV into an append-only,
+  resumable store under `~/.ccbalancer/simulation/{exchange}/{symbol}/{timeframe}.jsonl` + a
+  coverage/gap `manifest.json`. A range is never re-downloaded — only the missing tail since the last
+  closed candle is appended, so prior rows stay byte-identical across resumed fetches. Per-timeframe
+  source routing: **1m/5m → a Binance public REST klines fallback** (`stores/history_fetch.py`, deep
+  backfill where ccxt pagination is impractical); every other timeframe (15m/1h/4h/1d) → the ccxt
+  pager (`ExchangeStore.fetch_ohlcv_range`). Both drop the still-forming candle and normalize to
+  `[t,o,h,l,c,v]`.
+- **Replay** (`simulation run`, I-13/I-15): a dedicated deterministic replay loop decides on each
+  *closed* candle via the **unchanged pure `RebalanceManager.decide`** and resolves the resulting
+  limit order on the **next** bar that crosses it (BUY when a later low ≤ limit, SELL when a later
+  high ≥ limit) — never the decision bar (**no look-ahead**). With `--fill-timeframe` a finer series
+  resolves fills *within* each decision interval (first crossing finer bar, at its own timestamp).
+  Fills mutate a virtual balance and land in an isolated per-run ledger keyed by a hash of all
+  inputs; identical inputs → a byte-identical ledger (**determinism**).
+- **Report** (`simulation report`, I-14): marks a completed run to its final candle close and emits
+  realized/unrealized/total P&L, ROI, fees, the per-trade timeline, and a **per-year breakdown** (so
+  a headline ROI can't hide cycle dependence). Reuses the average-cost `PerformanceManager` unchanged.
+
+**Network-only-in-stores invariant:** all network access — the ccxt pager *and* the Binance REST
+fallback — lives in the `stores/` layer (`exchange.py`, `history_fetch.py`); managers and the replay
+loop never touch the network or the clock. The replay engine consumes only offline candles, which is
+what makes it deterministic and testable without hitting an exchange.
+
 ## Command taxonomy (three categories)
 
 - **read** (live data, no side effects): `status` · `plan` · `analyze <pair> [--timeframe ...]` ·
   `indicator list` · `performance [--pair]` · `regime [--pair]` · `orders` · `version`
-- **write** (mutate state / place orders; dry-run by default, guarded): `rebalance` · `cancel` ·
-  `pair (list/add/set/remove)` · `indicator set` · `flag (add/list/remove)` · `config (show/init)` ·
-  `auth (login/logout/list/use/status/whoami)`
+- **write** (mutate state / place orders / fetch data; dry-run by default where it places orders,
+  guarded): `rebalance` · `cancel` · `pair (list/add/set/remove)` · `indicator set` ·
+  `flag (add/list/remove)` · `config (show/init)` · `auth (login/logout/list/use/status/whoami)` ·
+  `simulation fetch` (network → data store) · `simulation run` (local backtest, compute only)
 - **audit** (local logs only, no network, no side effects): `decisions` · `history` ·
-  `performance --history` · `export`
+  `performance --history` · `export` · `simulation report`
 
 Flags are command-scoped (composable parents): universal `--json`, `--fields`, `--config`;
 credential/venue commands add `--account`, `--exchange`, `--testnet/--no-testnet`; pair-filtering

@@ -18,5 +18,5 @@ Enhancement backlog (non-blocking, deferred). Promote to a phase when scheduled.
 | [I-12](improvements/I-12.md) | Paginated ccxt range fetch, a normalized append-only simulation OHLCV store, and the `simulation fetch` command. | ✅ Done in v0.4.0. |
 | [I-13](improvements/I-13.md) | Deterministic candle-replay loop wired to RebalanceManager.decide, filling on the next crossing bar. | ✅ Done in v0.4.0. |
 | [I-14](improvements/I-14.md) | Feed the sim ledger to PerformanceManager; emit a JSON/text report with a per-year breakdown. | ✅ Done in v0.4.0. |
-| [I-15](improvements/I-15.md) | stores/history_fetch.py Binance REST backfill for LTF, multi-timeframe alignment, volume handling. | 🚧 In progress. |
-| [I-16](improvements/I-16.md) | Document the engine, its false-confidence limits, and a capped live smoke-test procedure. | 🚧 In progress. |
+| [I-15](improvements/I-15.md) | stores/history_fetch.py Binance REST backfill for LTF, multi-timeframe alignment, volume handling. | ✅ Done in v0.5.0. |
+| [I-16](improvements/I-16.md) | Document the engine, its false-confidence limits, and a capped live smoke-test procedure. | ✅ Done in v0.5.0. |

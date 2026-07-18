@@ -93,3 +93,63 @@ def test_manifest_stamps_provenance(tmp_path):
     assert manifest['market'] == 'spot'
     assert manifest['fetched_at_utc'] == _FETCHED_AT
     assert manifest['timeframes']['1h']['row_count'] == 3
+
+
+_MIN_MS = 60_000
+
+
+class _FakeHistoryFetch:
+    '''Stand-in Binance REST fallback: records range calls, returns canned candles.'''
+
+    def __init__(self, ohlcv: dict[tuple[str, str], list[list[float]]]) -> None:
+        self.ohlcv = ohlcv
+        self.range_calls: list[tuple[str, str, int, int]] = []
+
+    def fetch_ohlcv_range(self, symbol, timeframe, since_ms, until_ms):
+        self.range_calls.append((symbol, timeframe, since_ms, until_ms))
+        return [c for c in self.ohlcv.get((symbol, timeframe), []) if since_ms <= c[0] < until_ms]
+
+
+def _minute_candles(count: int) -> list[list[float]]:
+    return [[_START + i * _MIN_MS, 10.0, 12.0, 9.0, 11.0, 100.0] for i in range(count)]
+
+
+def test_sub_daily_timeframe_routes_to_history_fetch(tmp_path):
+    minutes = _minute_candles(4)
+    exchange = FakeExchangeStore(exchange_id='binance')
+    history = _FakeHistoryFetch({('BTC/USDT', '1m'): minutes})
+    store = SimulationStore(tmp_path)
+    manager = SimulationManager(exchange, store, history_fetch=history)
+    until = minutes[-1][0] + _MIN_MS
+
+    results = manager.fetch('BTC/USDT', ['1m'], _START, until, _FETCHED_AT)
+
+    assert results[0].appended == 4
+    assert history.range_calls == [('BTC/USDT', '1m', _START, until)]
+    assert exchange.range_calls == []  # sub-daily never touches the ccxt pager
+
+
+def test_higher_timeframe_routes_to_ccxt_even_with_history_fetch(tmp_path):
+    hours = _candles(3)
+    exchange = FakeExchangeStore(exchange_id='binance', ohlcv={('BTC/USDT', '1h'): hours})
+    history = _FakeHistoryFetch({})
+    store = SimulationStore(tmp_path)
+    manager = SimulationManager(exchange, store, history_fetch=history)
+    until = hours[-1][0] + _HOUR_MS
+
+    manager.fetch('BTC/USDT', ['1h'], _START, until, _FETCHED_AT)
+
+    assert exchange.range_calls == [('BTC/USDT', '1h', _START, until)]
+    assert history.range_calls == []  # higher timeframes stay on ccxt
+
+
+def test_sub_daily_falls_back_to_ccxt_when_no_history_fetch(tmp_path):
+    minutes = _minute_candles(3)
+    exchange = FakeExchangeStore(exchange_id='binance', ohlcv={('BTC/USDT', '1m'): minutes})
+    store = SimulationStore(tmp_path)
+    manager = SimulationManager(exchange, store)  # no history_fetch injected
+    until = minutes[-1][0] + _MIN_MS
+
+    manager.fetch('BTC/USDT', ['1m'], _START, until, _FETCHED_AT)
+
+    assert exchange.range_calls == [('BTC/USDT', '1m', _START, until)]

@@ -70,6 +70,7 @@ from ccbalancer.stores.auth_store import AuthStore, backend_for, normalize_accou
 from ccbalancer.stores.decision_store import DecisionStore
 from ccbalancer.stores.exchange import ExchangeStore, requires_passphrase
 from ccbalancer.stores.flags_store import FlagsStore
+from ccbalancer.stores.history_fetch import BinanceHistoryFetch
 from ccbalancer.stores.ledger_store import LedgerStore
 from ccbalancer.stores.market_cache import MarketCache
 from ccbalancer.stores.portfolio_store import PortfolioStore, pair_to_dict
@@ -330,7 +331,7 @@ def _add_simulation_command(
     fetch.add_argument('symbol', help='Pair as BASE/QUOTE (e.g. BTC/USDT).')
     fetch.add_argument(
         '--timeframe', action='append', metavar='TF',
-        help='Timeframe to fetch; repeatable. Default: 1h, 4h, 1d.',
+        help='Timeframe to fetch; repeatable. Default: 15m, 1h, 4h, 1d.',
     )
     fetch.add_argument(
         '--start', required=True, metavar='DATE',
@@ -357,6 +358,11 @@ def _add_simulation_run(sub: argparse._SubParsersAction, parents: list[argparse.
     run.add_argument(
         '--timeframe', metavar='TF', default=SIM_DEFAULT_DECISION_TIMEFRAME,
         help=f'Decision timeframe (default: {SIM_DEFAULT_DECISION_TIMEFRAME}). Must be already fetched.',
+    )
+    run.add_argument(
+        '--fill-timeframe', metavar='TF', dest='fill_timeframe', default=None,
+        help='Finer timeframe that resolves fills within each decision interval '
+             '(default: the decision timeframe). Must be already fetched.',
     )
     run.add_argument('--start', required=True, metavar='DATE', help='Replay start, ISO-8601 (e.g. 2022-09-01).')
     run.add_argument('--end', metavar='DATE', help='Replay end, ISO-8601 (default: now).')
@@ -851,14 +857,19 @@ def _cmd_simulation_fetch(args: argparse.Namespace) -> ExitCode:
 
 
 def _simulation_manager(config: config_mod.AppConfig) -> SimulationManager:
-    '''Build the simulation manager (seam for tests to inject a fake exchange).'''
+    '''Build the simulation manager (seam for tests to inject a fake exchange).
+
+    Sub-daily (1m/5m) timeframes route to the Binance REST klines fallback for
+    deep backfill; every other timeframe uses the ccxt pager.
+    '''
     data_store = ExchangeStore(
         exchange_id=config.data_exchange,
         testnet=config.testnet,
         timeout_ms=config.http_timeout_ms,
     )
     sim_store = SimulationStore(config.app_dir / SIMULATION_DIRNAME)
-    return SimulationManager(data_store, sim_store)
+    history_fetch = BinanceHistoryFetch(timeout_ms=config.http_timeout_ms)
+    return SimulationManager(data_store, sim_store, history_fetch=history_fetch)
 
 
 def _cmd_simulation_run(args: argparse.Namespace) -> ExitCode:
@@ -875,7 +886,8 @@ def _cmd_simulation_run(args: argparse.Namespace) -> ExitCode:
         amount_precision=args.amount_precision,
         min_cost=args.min_cost,
     )
-    result = manager.run(config.data_exchange, symbol, args.timeframe, start_ms, end_ms, pair, params)
+    result = manager.run(config.data_exchange, symbol, args.timeframe, start_ms, end_ms, pair, params,
+                         fill_timeframe=args.fill_timeframe)
     meta = {'exchange': config.data_exchange, 'testnet': config.testnet, 'generated_at': now_iso()}
     _emit(args, render.simulation_run_response(result, meta), render.simulation_run_lines(result))
     return ExitCode.OK

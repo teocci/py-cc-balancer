@@ -344,6 +344,7 @@ def sim_run_to_dict(result: SimRunResult) -> dict[str, object]:
     return {
         'symbol': result.symbol,
         'timeframe': result.timeframe,
+        'fill_timeframe': result.fill_timeframe,
         'run_id': result.run_id,
         'start': ms_to_iso(result.start_ms),
         'end': ms_to_iso(result.end_ms),
@@ -367,8 +368,9 @@ def simulation_run_response(result: SimRunResult, meta: dict[str, object]) -> di
 
 def simulation_run_lines(result: SimRunResult) -> list[str]:
     '''Human summary of a backtest run: activity counts and final value.'''
+    fill = f' fill@{result.fill_timeframe}' if result.fill_timeframe else ''
     return [
-        f'{result.symbol} {result.timeframe} backtest [{ms_to_iso(result.start_ms)} .. '
+        f'{result.symbol} {result.timeframe}{fill} backtest [{ms_to_iso(result.start_ms)} .. '
         f'{ms_to_iso(result.end_ms)}] run {result.run_id}',
         f'  bars {result.bars}, orders {result.orders_placed}, fills {result.fills}, '
         f'rejects {result.rejects}',

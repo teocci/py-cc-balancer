@@ -16,13 +16,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ccbalancer import constants as c
 from ccbalancer.models import SimFetchResult
 from ccbalancer.utils.candles import CANDLE_TIME
 from ccbalancer.utils.timeutil import timeframe_to_seconds
 
 if TYPE_CHECKING:
     from ccbalancer.stores.exchange import ExchangeStore
+    from ccbalancer.stores.history_fetch import BinanceHistoryFetch
     from ccbalancer.stores.simulation_store import SimulationStore
+
+    # Either source exposes fetch_ohlcv_range(symbol, timeframe, since, until).
+    RangeSource = ExchangeStore | BinanceHistoryFetch
 
 __all__ = ['SimulationManager']
 
@@ -35,12 +40,15 @@ class SimulationManager:
     '''Fetch-and-persist coordinator for the backtest data foundation.
 
     Attributes:
-        exchange: Network store supplying paginated range candles.
+        exchange: Network store supplying paginated range candles (ccxt pager).
         store: Append-only simulation OHLCV store the candles land in.
+        history_fetch: Optional Binance REST fallback for sub-daily (1m/5m)
+            backfill; when absent, every timeframe uses the ccxt pager.
     '''
 
     exchange: ExchangeStore
     store: SimulationStore
+    history_fetch: BinanceHistoryFetch | None = None
 
     def fetch(
         self,
@@ -76,11 +84,18 @@ class SimulationManager:
         since = start_ms if last_open is None else last_open + interval_ms
         appended = 0
         # Skip the network entirely when the store already covers the requested
-        # range; otherwise pull only the missing tail.
+        # range; otherwise pull only the missing tail from the routed source.
         if since < until_ms:
-            candles = self.exchange.fetch_ohlcv_range(symbol, timeframe, since, until_ms)
+            candles = self._source_for(timeframe).fetch_ohlcv_range(symbol, timeframe, since, until_ms)
             appended = self.store.append(exchange_id, symbol, timeframe, candles)
         return self._summarize(exchange_id, symbol, timeframe, appended, up_to_date=appended == 0)
+
+    def _source_for(self, timeframe: str) -> RangeSource:
+        '''Pick the range source: the Binance REST fallback for sub-daily (1m/5m)
+        when available, else the ccxt pager for every other timeframe.'''
+        if self.history_fetch is not None and timeframe in c.SIM_LTF_TIMEFRAMES:
+            return self.history_fetch
+        return self.exchange
 
     def _summarize(
         self, exchange_id: str, symbol: str, timeframe: str, appended: int, *, up_to_date: bool

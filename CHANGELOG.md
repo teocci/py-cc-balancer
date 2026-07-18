@@ -6,6 +6,26 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-18
+
+backtest sub-daily timeframes + Binance REST fallback, multi-timeframe fills, backtest docs & live smoke-test runbook
+
+### Added
+- I-15: sub-daily backtest support — new `stores/history_fetch.py` (`BinanceHistoryFetch`) is a
+  paginated public Binance `/api/v3/klines` fallback for deep 1m/5m backfill (closed-candles-only,
+  429/418 backoff, HTTP-451 → `data.binance.vision` archive note); `simulation fetch` routes 1m/5m to
+  it and every other timeframe to the ccxt pager. `simulation run --fill-timeframe <TF>` resolves
+  fills on a finer timeframe *within each decision interval* (first crossing bar fills, no
+  look-ahead), for higher-resolution backtests. `15m` is now a default fetched timeframe.
+
+### Changed
+- I-16: backtest documentation — `DESIGN.md` gains a *Backtest engine (offline)* section (fetch →
+  replay → report, the dedicated replay loop, the network-only-in-stores invariant) and the
+  `simulation` commands in the taxonomy; new `docs/backtest.md` (how to read results + honest
+  limitations: bar-fill assumption, cycle/overfitting, fees, gaps) and `docs/live-smoke-test.md` (a
+  capped live runbook validating auth/real-fill/rejection, cross-referencing the deferred F-6
+  execution-reconciliation gap). Frames the backtest as strategy research, not execution validation.
+
 ## [0.4.0] - 2026-07-18
 
 backtest engine — historical data foundation, deterministic replay, P&L reporting

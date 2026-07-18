@@ -119,3 +119,65 @@ def test_replay_is_deterministic():
     b = replay(candles, _pair(), _rebalancer(), _params(fee_rate=0.001))
     assert a.fills == b.fills  # frozen dataclass equality
     assert (a.final_base, a.final_stable) == (b.final_base, b.final_stable)
+
+
+# --- Multi-timeframe fill alignment (I-15): a finer series resolves fills ---
+# within each decision interval, at the finer bar's timestamp, no look-ahead.
+
+_HOUR_MS = 3_600_000
+
+
+def _hour(day: int, hour: int, low: float, high: float) -> list[float]:
+    ts = _START + day * _DAY_MS + hour * _HOUR_MS
+    return [ts, 100.0, high, low, 100.0, 10.0]
+
+
+def test_aligned_fill_resolves_on_finer_bar_within_next_interval():
+    from ccbalancer.utils.timeutil import ms_to_iso
+    # day0 decides BUY @100; the fill is resolved over day1's hourly bars.
+    daily = [_candle(0, 100, 100, 100, 100), _candle(1, 100, 105, 95, 100)]
+    # day1 hours: first three stay above 100, the fourth dips to 99 -> first cross.
+    fill_candles = [
+        _hour(1, 0, low=101, high=106), _hour(1, 1, low=101, high=104),
+        _hour(1, 2, low=102, high=103), _hour(1, 3, low=99, high=101),
+        _hour(1, 4, low=98, high=102),
+    ]
+    outcome = replay(daily, _pair(), _rebalancer(), _params(), fill_candles=fill_candles)
+
+    assert len(outcome.fills) == 1
+    fill = outcome.fills[0]
+    assert fill.price == 100.0
+    assert fill.qty == 80.0
+    # Filled at the crossing hour (day1 hour3), not the daily bar's open.
+    assert fill.ts == ms_to_iso(_START + _DAY_MS + 3 * _HOUR_MS)
+
+
+def test_aligned_no_look_ahead_finer_bars_of_own_interval_never_fill():
+    # day0 decides BUY @100. Its OWN interval's hours dip below 100 (would fill if
+    # look-ahead leaked); day1's hours stay above -> the order must NOT fill.
+    daily = [_candle(0, 100, 100, 100, 100), _candle(1, 101, 105, 101, 103)]
+    fill_candles = [
+        _hour(0, 5, low=90, high=100),   # day0 interval — must be ignored
+        _hour(0, 6, low=90, high=100),
+        _hour(1, 0, low=101, high=105),  # day1 interval — never crosses 100
+        _hour(1, 1, low=102, high=106),
+    ]
+    outcome = replay(daily, _pair(), _rebalancer(), _params(), fill_candles=fill_candles)
+    assert outcome.fills == []
+
+
+def test_aligned_empty_window_rests_without_filling():
+    # No finer bars cover day1's interval -> the order rests (re-quoted next bar).
+    daily = [_candle(0, 100, 100, 100, 100), _candle(1, 100, 105, 95, 100)]
+    fill_candles = [_hour(0, 1, low=90, high=100)]  # only day0-interval bars
+    outcome = replay(daily, _pair(), _rebalancer(), _params(), fill_candles=fill_candles)
+    assert outcome.fills == []
+
+
+def test_aligned_replay_is_deterministic():
+    daily = [_candle(0, 100, 100, 100, 100), _candle(1, 100, 105, 95, 100)]
+    fill_candles = [_hour(1, h, low=99 if h == 2 else 101, high=105) for h in range(5)]
+    a = replay(daily, _pair(), _rebalancer(), _params(fee_rate=0.001), fill_candles=fill_candles)
+    b = replay(daily, _pair(), _rebalancer(), _params(fee_rate=0.001), fill_candles=fill_candles)
+    assert a.fills == b.fills
+    assert (a.final_base, a.final_stable) == (b.final_base, b.final_stable)
