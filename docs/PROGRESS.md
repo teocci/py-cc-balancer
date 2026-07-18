@@ -1,9 +1,9 @@
 # PROGRESS
 
-**Current version:** 0.3.0
-**Active phase:** `v0.3.0` market-intelligence II — I-9 (ADX +DI/-DI), I-10 (support/resistance
-levels), I-11 (`--help` discoverability). 445 tests. See `docs/phases/phase-15.md`,
-`phase-16.md`, `docs/improvements/I-9.md`…`I-11.md`.
+**Current version:** 0.4.0
+**Active phase:** `v0.4.0` backtest engine — I-12 (historical data foundation), I-13 (deterministic
+replay engine), I-14 (P&L reporting). 506 tests. R3 (P-20 sub-daily + Binance fetcher, P-21 docs)
+remains. See `docs/phases/phase-17.md`…`phase-19.md`, `docs/improvements/I-12.md`…`I-14.md`.
 
 ## Phase status
 
@@ -27,6 +27,11 @@ levels), I-11 (`--help` discoverability). 445 tests. See `docs/phases/phase-15.m
 | 14 | Packaging, portable bundle & release CI | done |
 | 15 | Market intelligence II — ADX & Support/Resistance indicators | done |
 | 16 | CLI --help discoverability polish | done |
+| 17 | Backtest data foundation | done |
+| 18 | Backtest replay engine | done |
+| 19 | Backtest reporting | done |
+| 20 | Sub-daily timeframes + Binance fallback fetcher | planned |
+| 21 | Backtest docs + live smoke-test runbook | planned |
 
 > **Redefinition (2026-06-18):** the project was re-scoped from a pure rebalancer into an agent
 > decision-support tool (read-only market intelligence + deterministic execution + offline memory).
@@ -35,9 +40,41 @@ levels), I-11 (`--help` discoverability). 445 tests. See `docs/phases/phase-15.m
 
 ## Next action
 
-`v0.3.0` cut (ADX + support/resistance + `--help` polish). No active plan — run `phase-start` when
-the next plan is approved. Deferred: the multi-timeframe MTFA strategy layer (see
-`docs/trading/`), MCP server, DEX adapter.
+`v0.4.0` cut (backtest engine — data foundation + replay + reporting; R2 = P-17/P-18/P-19). Plan
+continues: R3 is **P-20** (sub-daily 1m/5m + Binance REST fallback fetcher, I-15) and **P-21**
+(backtest docs + live smoke-test runbook, I-16) — independent, runnable in parallel. Deferred: the
+multi-timeframe MTFA strategy layer (see `docs/trading/`), MCP server, DEX adapter.
+
+> Phase 19 (done): backtest reporting (I-14). New `simulation report <run_id>` marks a completed run to
+> its final candle close and reports realized/unrealized/total P&L, ROI (vs starting `--capital`), fees,
+> the per-trade timeline, and a **per-year breakdown** — reusing the average-cost
+> `PerformanceManager.walk_fills` unchanged (no accounting rebuilt). The per-year split keeps a headline
+> ROI from hiding cycle dependence; realized + fees sum back to the totals. Offline/audit-category read;
+> P-18's `run.json` gained `final_base`/`final_stable`/`final_close` for marking without a candle re-read.
+> Verified live on the real 2022→2026 daily run: total P&L 16498.76 (ROI 164.99%) ties out exactly to
+> `final_value − capital`, per-year realized sums to the total (2024 +2291, 2023 +720). 506 tests.
+> Closes R2 (v0.4.0 with P-17, P-18). See `docs/phases/phase-19.md`, `docs/improvements/I-14.md`.
+
+> Phase 18 (done): backtest replay engine (I-13). New `simulation run <pair> --start --end --capital`
+> replays stored candles deterministically: it decides on each *closed* bar via the unchanged pure
+> `RebalanceManager.decide` and resolves the order on the **next** bar that crosses the limit (BUY
+> `low<=limit` / SELL `high>=limit`; no look-ahead), else rests and re-quotes (live cancel-and-replace).
+> A virtual balance seeded all-stable from `--capital` mutates only on fills; `--fee-rate` (maker,
+> default 0.1%) and `--min-cost`/precision enforce market realism (sub-min → `OrderRejectedError`, so
+> the "never converges" failure stays visible). Each run writes an isolated ledger + `run.json` under
+> `simulation/runs/{run_id}/`; identical inputs → byte-identical ledger. Verified live on the real
+> 2022→2026 daily series (1416 bars, 6 fills, +165% ROI, deterministic re-run). 497 tests. Batched into
+> R2 (releases with P-17, P-19). See `docs/phases/phase-18.md`, `docs/improvements/I-13.md`.
+
+> Phase 17 (done): backtest data foundation (I-12). New `simulation fetch <pair> --timeframe --start
+> --end` downloads historical OHLCV into an append-only, resumable store under
+> `~/.ccbalancer/simulation/` — `ExchangeStore.fetch_ohlcv_range` paginates ccxt and drops the
+> still-forming candle; `SimulationStore` appends only the missing tail since the last closed candle
+> (prior rows byte-identical) and writes a per-symbol `manifest.json` (coverage/gaps) mirroring the
+> shipped `data/simulation/` sample; a CSV/JSONL loader ingests that sample so backtests run offline.
+> Verified live against public Binance: a clean rebuild reproduced the sample byte-for-byte
+> (1h 33983 / 4h 8496 / 1d 1416 rows). 481 tests. Batched into R2 (releases with P-18, P-19). See
+> `docs/phases/phase-17.md`, `docs/improvements/I-12.md`.
 
 > Phase 16 (done): CLI `--help` discoverability polish (I-11). The root `description` now states the
 > two-layer "CLI computes deterministic facts, never judges; agent/human decides" model; the

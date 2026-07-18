@@ -29,6 +29,13 @@ from ccbalancer.constants import (
     MILESTONE_OPS,
     OHLCV_DIRNAME,
     PORTFOLIO_FILENAME,
+    SIM_DEFAULT_AMOUNT_PRECISION,
+    SIM_DEFAULT_CAPITAL,
+    SIM_DEFAULT_DECISION_TIMEFRAME,
+    SIM_DEFAULT_FEE_RATE,
+    SIM_DEFAULT_MIN_COST,
+    SIM_DEFAULT_TIMEFRAMES,
+    SIMULATION_DIRNAME,
     STATE_FILENAME,
     ExitCode,
 )
@@ -55,6 +62,9 @@ from ccbalancer.managers.performance_manager import PerformanceManager, portfoli
 from ccbalancer.managers.portfolio_manager import PortfolioManager
 from ccbalancer.managers.rebalance_manager import RebalanceManager
 from ccbalancer.managers.regime_manager import RegimeManager
+from ccbalancer.managers.simulation_manager import SimulationManager
+from ccbalancer.managers.simulation_report_manager import SimulationReportManager
+from ccbalancer.managers.simulation_run_manager import ReplayParams, SimulationRunManager
 from ccbalancer.models import Account, ExecutionResult, PairConfig
 from ccbalancer.stores.auth_store import AuthStore, backend_for, normalize_account_name
 from ccbalancer.stores.decision_store import DecisionStore
@@ -63,11 +73,12 @@ from ccbalancer.stores.flags_store import FlagsStore
 from ccbalancer.stores.ledger_store import LedgerStore
 from ccbalancer.stores.market_cache import MarketCache
 from ccbalancer.stores.portfolio_store import PortfolioStore, pair_to_dict
+from ccbalancer.stores.simulation_store import SimulationStore
 from ccbalancer.stores.state_store import StateStore
 from ccbalancer.utils import indicator_registry as registry
 from ccbalancer.utils import render
 from ccbalancer.utils.logging import configure_logging
-from ccbalancer.utils.timeutil import now_iso
+from ccbalancer.utils.timeutil import iso_to_ms, now_iso, now_ms
 
 __all__ = ['build_parser', 'main']
 
@@ -91,9 +102,10 @@ _EXIT_BY_ERROR: dict[type[AppError], ExitCode] = {
 _COMMAND_TAXONOMY = '''command categories:
   read  (live, network):      status, plan, analyze, performance, regime, orders, flag list, auth status
   read  (local, no network):  version, indicator list, pair list, config show, auth list, auth whoami
+  write (data):               simulation fetch (network), simulation run (local backtest)
   write (state / orders):     rebalance, cancel, pair add|set|remove, indicator set, flag add|remove, config init
   write (credentials):        auth login|logout|use|rename
-  audit (local logs):         decisions, history, performance --history, export
+  audit (local logs):         decisions, history, performance --history, export, simulation report
 
 rebalance is dry-run by default; pass --execute --confirm <token> (from plan) to place orders.'''
 
@@ -134,6 +146,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_regime_command(subparsers, trade)
     _add_flag_command(subparsers, acct, trade)
     _add_analyze_command(subparsers, [base, venue])
+    _add_simulation_command(subparsers, base, venue)
     _add_indicator_command(subparsers, [base])
     _add_config_command(subparsers, [base], [base, account, venue])
     _add_auth_command(subparsers, [base], [base, account], [base, venue])
@@ -301,6 +314,70 @@ def _add_analyze_command(subparsers: argparse._SubParsersAction, parents: list[a
     )
 
 
+def _add_simulation_command(
+    subparsers: argparse._SubParsersAction,
+    base: argparse.ArgumentParser,
+    venue: argparse.ArgumentParser,
+) -> None:
+    # fetch/run resolve a data venue (base + venue); report is a local read (base only).
+    parents = [base, venue]
+    simulation = subparsers.add_parser('simulation', help='Backtest data + engine (fetch, run, report).')
+    sub = simulation.add_subparsers(dest='simulation_command', metavar='<action>')
+    fetch = sub.add_parser(
+        'fetch', parents=parents,
+        help='Download historical OHLCV into the resumable simulation store (append-only).',
+    )
+    fetch.add_argument('symbol', help='Pair as BASE/QUOTE (e.g. BTC/USDT).')
+    fetch.add_argument(
+        '--timeframe', action='append', metavar='TF',
+        help='Timeframe to fetch; repeatable. Default: 1h, 4h, 1d.',
+    )
+    fetch.add_argument(
+        '--start', required=True, metavar='DATE',
+        help='Range start, ISO-8601 (e.g. 2022-09-01). Used only when a timeframe has no stored data.',
+    )
+    fetch.add_argument(
+        '--end', metavar='DATE',
+        help='Range end, ISO-8601 (default: now). The still-forming last candle is excluded.',
+    )
+    _add_simulation_run(sub, parents)
+    report = sub.add_parser(
+        'report', parents=[base],
+        help='Report P&L / ROI / per-year breakdown for a completed run (offline, no network).',
+    )
+    report.add_argument('run_id', help='Run id printed by `simulation run` (names the run directory).')
+
+
+def _add_simulation_run(sub: argparse._SubParsersAction, parents: list[argparse.ArgumentParser]) -> None:
+    run = sub.add_parser(
+        'run', parents=parents,
+        help='Backtest a configured pair over stored candles (deterministic; compute only).',
+    )
+    run.add_argument('symbol', help='Pair as BASE/QUOTE; must be configured (see `pair add`).')
+    run.add_argument(
+        '--timeframe', metavar='TF', default=SIM_DEFAULT_DECISION_TIMEFRAME,
+        help=f'Decision timeframe (default: {SIM_DEFAULT_DECISION_TIMEFRAME}). Must be already fetched.',
+    )
+    run.add_argument('--start', required=True, metavar='DATE', help='Replay start, ISO-8601 (e.g. 2022-09-01).')
+    run.add_argument('--end', metavar='DATE', help='Replay end, ISO-8601 (default: now).')
+    run.add_argument(
+        '--capital', type=float, default=SIM_DEFAULT_CAPITAL, metavar='QUOTE',
+        help=f'Starting capital in quote terms, seeded all-stable (default: {SIM_DEFAULT_CAPITAL}).',
+    )
+    run.add_argument(
+        '--fee-rate', type=float, default=SIM_DEFAULT_FEE_RATE, dest='fee_rate', metavar='RATE',
+        help=f'Maker fee applied to each fill notional (default: {SIM_DEFAULT_FEE_RATE}).',
+    )
+    run.add_argument(
+        '--amount-precision', type=int, default=SIM_DEFAULT_AMOUNT_PRECISION, dest='amount_precision',
+        metavar='N', help=f'Decimal places the order amount is floored to (default: {SIM_DEFAULT_AMOUNT_PRECISION}).',
+    )
+    run.add_argument(
+        '--min-cost', type=float, default=SIM_DEFAULT_MIN_COST, dest='min_cost', metavar='QUOTE',
+        help='Exchange min-notional floor; an order below it is rejected (default: 0 = no floor).',
+    )
+
+
 def _add_indicator_command(subparsers: argparse._SubParsersAction, parents: list[argparse.ArgumentParser]) -> None:
     parser = subparsers.add_parser('indicator', help='List or set indicator parameters.')
     sub = parser.add_subparsers(dest='indicator_command', metavar='<action>')
@@ -420,6 +497,8 @@ def _dispatch(args: argparse.Namespace) -> ExitCode:
         return _cmd_flag(args)
     if args.command == 'analyze':
         return _cmd_analyze(args)
+    if args.command == 'simulation':
+        return _cmd_simulation(args)
     if args.command == 'indicator':
         return _cmd_indicator(args)
     if args.command == 'config':
@@ -740,6 +819,88 @@ def _default_timeframes(config: config_mod.AppConfig) -> list[str]:
     '''Decision then analysis timeframes, de-duplicated, order preserved.'''
     ordered = dict.fromkeys((*config.decision_timeframes, *config.analysis_timeframes))
     return list(ordered)
+
+
+def _cmd_simulation(args: argparse.Namespace) -> ExitCode:
+    if args.simulation_command == 'fetch':
+        return _cmd_simulation_fetch(args)
+    if args.simulation_command == 'run':
+        return _cmd_simulation_run(args)
+    if args.simulation_command == 'report':
+        return _cmd_simulation_report(args)
+    _emit(
+        args,
+        {'error': 'specify: simulation fetch | simulation run | simulation report'},
+        ['Usage: simulation fetch|run <symbol> --start DATE | simulation report <run_id>'],
+    )
+    return ExitCode.CONFIG_ERROR
+
+
+def _cmd_simulation_fetch(args: argparse.Namespace) -> ExitCode:
+    config = _load_config(args)
+    manager = _simulation_manager(config)
+    symbol = args.symbol.upper()
+    timeframes = args.timeframe or list(SIM_DEFAULT_TIMEFRAMES)
+    start_ms = iso_to_ms(args.start)
+    until_ms = iso_to_ms(args.end) if args.end else now_ms()
+    results = manager.fetch(symbol, timeframes, start_ms, until_ms, now_iso())
+    meta = {'exchange': config.data_exchange, 'testnet': config.testnet, 'generated_at': now_iso()}
+    payload = render.simulation_fetch_response(symbol, results, meta)
+    _emit(args, payload, render.simulation_fetch_lines(symbol, results))
+    return ExitCode.OK
+
+
+def _simulation_manager(config: config_mod.AppConfig) -> SimulationManager:
+    '''Build the simulation manager (seam for tests to inject a fake exchange).'''
+    data_store = ExchangeStore(
+        exchange_id=config.data_exchange,
+        testnet=config.testnet,
+        timeout_ms=config.http_timeout_ms,
+    )
+    sim_store = SimulationStore(config.app_dir / SIMULATION_DIRNAME)
+    return SimulationManager(data_store, sim_store)
+
+
+def _cmd_simulation_run(args: argparse.Namespace) -> ExitCode:
+    config = _load_config(args)
+    symbol = args.symbol.upper()
+    portfolio = PortfolioStore(config.data_dir / PORTFOLIO_FILENAME)
+    pair = _selected_pairs(portfolio, [symbol])[0]  # raises PortfolioError if unconfigured
+    manager = _simulation_run_manager(config)
+    start_ms = iso_to_ms(args.start)
+    end_ms = iso_to_ms(args.end) if args.end else now_ms()
+    params = ReplayParams(
+        capital=args.capital,
+        fee_rate=args.fee_rate,
+        amount_precision=args.amount_precision,
+        min_cost=args.min_cost,
+    )
+    result = manager.run(config.data_exchange, symbol, args.timeframe, start_ms, end_ms, pair, params)
+    meta = {'exchange': config.data_exchange, 'testnet': config.testnet, 'generated_at': now_iso()}
+    _emit(args, render.simulation_run_response(result, meta), render.simulation_run_lines(result))
+    return ExitCode.OK
+
+
+def _simulation_run_manager(config: config_mod.AppConfig) -> SimulationRunManager:
+    '''Build the backtest run manager (seam for tests to inject candles/pair).'''
+    sim_store = SimulationStore(config.app_dir / SIMULATION_DIRNAME)
+    return SimulationRunManager(sim_store, RebalanceManager.from_config(config))
+
+
+def _cmd_simulation_report(args: argparse.Namespace) -> ExitCode:
+    config = _load_config(args)
+    report = _simulation_report_manager(config).report(args.run_id)
+    _emit(
+        args,
+        render.simulation_report_response(report, now_iso()),
+        render.simulation_report_lines(report),
+    )
+    return ExitCode.OK
+
+
+def _simulation_report_manager(config: config_mod.AppConfig) -> SimulationReportManager:
+    '''Build the backtest report manager (seam for tests).'''
+    return SimulationReportManager(SimulationStore(config.app_dir / SIMULATION_DIRNAME))
 
 
 def _indicators_manager(config: config_mod.AppConfig) -> IndicatorsManager:

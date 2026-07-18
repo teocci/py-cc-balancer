@@ -12,6 +12,8 @@ from ccbalancer.models.pair_config import PairConfig
 from ccbalancer.models.performance import PerformanceSnapshot
 from ccbalancer.models.regime import RegimeScenario, RegimeSignal
 from ccbalancer.models.result import ExecutionResult
+from ccbalancer.models.sim_fetch import SimFetchResult
+from ccbalancer.models.sim_run import SimRunResult
 from ccbalancer.models.state import HistoryEvent, RebalanceState
 
 __all__ = [
@@ -30,4 +32,6 @@ __all__ = [
     'HistoryEvent',
     'ExecutionResult',
     'Fill',
+    'SimFetchResult',
+    'SimRunResult',
 ]

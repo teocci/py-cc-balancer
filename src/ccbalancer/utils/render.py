@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ccbalancer.constants import CCB_PREFIX, SCHEMA_VERSION
+from ccbalancer.utils.timeutil import ms_to_iso
 
 if TYPE_CHECKING:
     from ccbalancer.models import (
@@ -30,6 +31,8 @@ if TYPE_CHECKING:
         RebalanceDecision,
         RegimeScenario,
         RegimeSignal,
+        SimFetchResult,
+        SimRunResult,
     )
 
 __all__ = [
@@ -57,6 +60,14 @@ __all__ = [
     'rebalance_exec_response',
     'orders_response',
     'cancel_response',
+    'sim_fetch_to_dict',
+    'simulation_fetch_response',
+    'simulation_fetch_lines',
+    'sim_run_to_dict',
+    'simulation_run_response',
+    'simulation_run_lines',
+    'simulation_report_response',
+    'simulation_report_lines',
     'masked_account',
     'auth_list_response',
     'auth_status_response',
@@ -294,6 +305,104 @@ def analyze_response(
     unavailable = [tf for tf, snap in zip(timeframes, snapshots) if snap is None]
     body = {'symbol': symbol, 'timeframes': available, 'unavailable_timeframes': unavailable}
     return _envelope('analyze', meta, body)
+
+
+def sim_fetch_to_dict(result: SimFetchResult) -> dict[str, object]:
+    '''Serialize one simulation-fetch timeframe result (open times as ISO).'''
+    return {
+        'timeframe': result.timeframe,
+        'appended': result.appended,
+        'total_rows': result.total_rows,
+        'first_open': ms_to_iso(result.first_open_ms) if result.first_open_ms is not None else None,
+        'last_open': ms_to_iso(result.last_open_ms) if result.last_open_ms is not None else None,
+        'up_to_date': result.up_to_date,
+    }
+
+
+def simulation_fetch_response(
+    symbol: str, results: list[SimFetchResult], meta: dict[str, object]
+) -> dict[str, object]:
+    '''Build the `simulation fetch` JSON envelope: per-timeframe fetch outcomes.'''
+    body = {'symbol': symbol, 'timeframes': [sim_fetch_to_dict(result) for result in results]}
+    return _envelope('simulation fetch', meta, body)
+
+
+def simulation_fetch_lines(symbol: str, results: list[SimFetchResult]) -> list[str]:
+    '''One human line per timeframe summarizing what was appended and total coverage.'''
+    lines = []
+    for result in results:
+        state = 'up-to-date' if result.up_to_date else f'+{result.appended}'
+        span = ''
+        if result.first_open_ms is not None and result.last_open_ms is not None:
+            span = f' [{ms_to_iso(result.first_open_ms)} .. {ms_to_iso(result.last_open_ms)}]'
+        lines.append(f'{symbol} {result.timeframe}: {state}, {result.total_rows} rows{span}')
+    return lines
+
+
+def sim_run_to_dict(result: SimRunResult) -> dict[str, object]:
+    '''Serialize a backtest run summary (open times as ISO; balances/value as floats).'''
+    return {
+        'symbol': result.symbol,
+        'timeframe': result.timeframe,
+        'run_id': result.run_id,
+        'start': ms_to_iso(result.start_ms),
+        'end': ms_to_iso(result.end_ms),
+        'capital': result.capital,
+        'fee_rate': result.fee_rate,
+        'bars': result.bars,
+        'orders_placed': result.orders_placed,
+        'fills': result.fills,
+        'rejects': result.rejects,
+        'final_base': result.final_base,
+        'final_stable': result.final_stable,
+        'final_value': result.final_value,
+        'ledger_path': result.ledger_path,
+    }
+
+
+def simulation_run_response(result: SimRunResult, meta: dict[str, object]) -> dict[str, object]:
+    '''Build the `simulation run` JSON envelope from the run summary.'''
+    return _envelope('simulation run', meta, sim_run_to_dict(result))
+
+
+def simulation_run_lines(result: SimRunResult) -> list[str]:
+    '''Human summary of a backtest run: activity counts and final value.'''
+    return [
+        f'{result.symbol} {result.timeframe} backtest [{ms_to_iso(result.start_ms)} .. '
+        f'{ms_to_iso(result.end_ms)}] run {result.run_id}',
+        f'  bars {result.bars}, orders {result.orders_placed}, fills {result.fills}, '
+        f'rejects {result.rejects}',
+        f'  final: {result.final_base:.8f} base + {result.final_stable:.2f} quote = '
+        f'{result.final_value:.2f} (from {result.capital:.2f})',
+        f'  ledger: {result.ledger_path}',
+    ]
+
+
+def simulation_report_response(report: dict[str, object], generated_at: str) -> dict[str, object]:
+    '''Wrap a backtest P&L report dict in the local (no live exchange) envelope.'''
+    return _local_envelope('simulation report', generated_at, report)
+
+
+def simulation_report_lines(report: dict[str, object]) -> list[str]:
+    '''Human backtest P&L summary: headline ROI, the split, and the per-year table.'''
+    roi = report.get('roi_pct')
+    roi_text = f'{roi:.2f}%' if isinstance(roi, (int, float)) else 'n/a'
+    lines = [
+        f'{report["symbol"]} backtest report — run {report.get("run_id")}',
+        f'  ROI {roi_text}  (total P&L {report["total_pnl"]:.2f} = realized '
+        f'{report["realized_pnl"]:.2f} + unrealized {report["unrealized_pnl"]:.2f})',
+        f'  final value {report["final_value"]:.2f} from {report["capital"]:.2f}; '
+        f'fees {report["fees_paid"]:.2f}; {len(report.get("trades", []))} trades',
+    ]
+    by_year = report.get('by_year') or []
+    if by_year:
+        lines.append('  by year:')
+        lines.extend(
+            f'    {row["year"]}: realized {row["realized_pnl"]:.2f}, fees {row["fees"]:.2f}, '
+            f'trades {row["trades"]}'
+            for row in by_year
+        )
+    return lines
 
 
 def status_response(rows: list[StatusRow], meta: dict[str, object]) -> dict[str, object]:

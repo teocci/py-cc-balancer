@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -34,6 +35,16 @@ def appdir(tmp_path, monkeypatch):
                 ENV_ACCOUNT, ENV_PROFILE, ENV_AUTH_BACKEND):
         monkeypatch.delenv(key, raising=False)
     return directory
+
+
+@pytest.fixture
+def sample_dir() -> Path:
+    '''Path to the committed backtest OHLCV sample (``data/simulation/``).
+
+    A repo asset (not user data), so it resolves relative to the repo root rather
+    than through the base-dir config helper; the loader tests ingest it directly.
+    '''
+    return Path(__file__).resolve().parents[1] / 'data' / 'simulation'
 
 
 @pytest.fixture
@@ -105,6 +116,8 @@ class FakeExchangeStore:
         cancelled: Cancellations made via ``cancel_order``, in call order.
         markets_loaded: Number of times ``load_markets`` was called.
         ohlcv_calls: ``(symbol, timeframe, limit)`` tuples seen by ``fetch_ohlcv``.
+        exchange_id: ccxt id reported to callers that read ``.exchange_id``.
+        range_calls: ``(symbol, timeframe, since, until)`` seen by ``fetch_ohlcv_range``.
     '''
 
     def __init__(
@@ -117,8 +130,10 @@ class FakeExchangeStore:
         ohlcv: dict[tuple[str, str], list[list[float]]] | None = None,
         offline: bool = False,
         account_ref: str | None = None,
+        exchange_id: str = 'binance',
     ) -> None:
         self._account_ref = account_ref
+        self.exchange_id = exchange_id
         self.markets = markets or {}
         self.balance = balance or {'free': {}, 'used': {}, 'total': {}}
         self.tickers = tickers or {}
@@ -129,6 +144,7 @@ class FakeExchangeStore:
         self.cancelled: list[dict[str, object]] = []
         self.markets_loaded = 0
         self.ohlcv_calls: list[tuple[str, str, int]] = []
+        self.range_calls: list[tuple[str, str, int, int]] = []
 
     def load_markets(self, reload: bool = False) -> dict[str, object]:
         self.markets_loaded += 1
@@ -161,6 +177,19 @@ class FakeExchangeStore:
         if self.offline:
             raise ExchangeError(f'offline: cannot fetch ohlcv {symbol} {timeframe}')
         return list(self.ohlcv.get((symbol, timeframe), []))
+
+    def fetch_ohlcv_range(
+        self, symbol: str, timeframe: str, since_ms: int, until_ms: int
+    ) -> list[list[float]]:
+        self.range_calls.append((symbol, timeframe, since_ms, until_ms))
+        if self.offline:
+            raise ExchangeError(f'offline: cannot fetch ohlcv range {symbol} {timeframe}')
+        window = [
+            list(candle)
+            for candle in self.ohlcv.get((symbol, timeframe), [])
+            if since_ms <= candle[0] < until_ms
+        ]
+        return window
 
     def create_order(
         self,

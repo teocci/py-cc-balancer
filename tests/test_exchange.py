@@ -250,6 +250,83 @@ def test_from_config_maps_fields():
     assert store.api_secret == 'secret'
 
 
+_HOUR_MS = 3_600_000
+
+
+def _candles(count: int, *, start: int = 1_000_000_000_000, step: int = _HOUR_MS) -> list[list[float]]:
+    '''An ascending run of synthetic hourly candles.'''
+    return [[start + i * step, 10.0 + i, 12.0 + i, 9.0 + i, 11.0 + i, 100.0 + i] for i in range(count)]
+
+
+class _PagingClient:
+    '''ccxt stand-in serving candles from a fixed list, honoring since/limit.'''
+
+    def __init__(self, candles: list[list[float]]) -> None:
+        self._candles = candles
+        self.calls: list[tuple[int, int]] = []
+
+    def fetch_ohlcv(self, symbol, timeframe, since, limit):
+        self.calls.append((since, limit))
+        window = [candle for candle in self._candles if int(float(candle[0])) >= since]
+        return [list(candle) for candle in window[:limit]]
+
+
+def test_fetch_ohlcv_range_paginates_all_pages():
+    candles = _candles(2500)
+    client = _PagingClient(candles)
+    store = _store_with(client)
+    until = candles[-1][0] + _HOUR_MS  # last candle is closed by `until`
+
+    result = store.fetch_ohlcv_range('BTC/USDT', '1h', candles[0][0], until)
+
+    assert [row[0] for row in result] == [candle[0] for candle in candles]
+    assert len(client.calls) == 3  # 1000 + 1000 + 500
+    # The cursor advances past each page's last open (no re-fetch of the boundary).
+    assert client.calls[1][0] == candles[999][0] + _HOUR_MS
+
+
+def test_fetch_ohlcv_range_drops_still_forming_last_candle():
+    candles = _candles(5)
+    client = _PagingClient(candles)
+    store = _store_with(client)
+    # `until` sits inside the last candle's interval: it has not closed yet.
+    until = candles[-1][0] + 1
+
+    result = store.fetch_ohlcv_range('BTC/USDT', '1h', candles[0][0], until)
+
+    assert [row[0] for row in result] == [candle[0] for candle in candles[:-1]]
+
+
+def test_fetch_ohlcv_range_excludes_below_since_and_at_or_after_until():
+    candles = _candles(10)
+    client = _PagingClient(candles)
+    store = _store_with(client)
+    since = candles[3][0]
+    until = candles[7][0] + _HOUR_MS  # candles[7] closes exactly at until -> kept
+
+    result = store.fetch_ohlcv_range('BTC/USDT', '1h', since, until)
+
+    assert [row[0] for row in result] == [candle[0] for candle in candles[3:8]]
+
+
+def test_fetch_ohlcv_range_normalizes_types():
+    client = _PagingClient([['1000000000000', '10.5', '12.0', '9.0', '11.0', '100.0']])
+    store = _store_with(client)
+
+    result = store.fetch_ohlcv_range('BTC/USDT', '1h', 1_000_000_000_000, 1_000_000_000_000 + 2 * _HOUR_MS)
+
+    assert result == [[1_000_000_000_000, 10.5, 12.0, 9.0, 11.0, 100.0]]
+    assert isinstance(result[0][0], int)
+
+
+def test_fetch_ohlcv_range_empty_when_nothing_in_window():
+    client = _PagingClient(_candles(3))
+    store = _store_with(client)
+    future = 2_000_000_000_000
+
+    assert store.fetch_ohlcv_range('BTC/USDT', '1h', future, future + _HOUR_MS) == []
+
+
 def test_fake_exchange_records_orders(fake_exchange: FakeExchangeStore):
     fake_exchange.create_order('BTC/USDT', OrderSide.BUY, 0.2, 49000.0, client_order_id='ccb-1')
     fake_exchange.cancel_order('fake-1', 'BTC/USDT')

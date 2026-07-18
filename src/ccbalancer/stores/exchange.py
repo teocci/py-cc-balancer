@@ -26,6 +26,9 @@ from ccbalancer.exceptions import (
     OrderRejectedError,
 )
 from ccbalancer.stores.exchange_quirks import ExchangeQuirks, quirks_for
+from ccbalancer.utils.candles import CANDLE_TIME as _CANDLE_TIME
+from ccbalancer.utils.candles import candle_to_record, record_to_candle
+from ccbalancer.utils.timeutil import timeframe_to_seconds
 
 if TYPE_CHECKING:
     from ccbalancer.config import AppConfig
@@ -127,6 +130,56 @@ class ExchangeStore:
             f'fetch ohlcv {symbol} {timeframe}',
             lambda: self.client.fetch_ohlcv(symbol, timeframe, None, limit),
         )
+
+    def fetch_ohlcv_range(
+        self, symbol: str, timeframe: str, since_ms: int, until_ms: int
+    ) -> list[list[float]]:
+        '''Return the closed ``[t,o,h,l,c,v]`` candles with open in ``[since_ms, until_ms)``.
+
+        Pages ccxt ``fetch_ohlcv(since=cursor, limit=…)``, advancing the cursor past
+        each page's last open so no candle is re-downloaded, until the venue runs
+        out of data or the cursor reaches ``until_ms``. Candles are normalized to
+        ccxt's uniform shape; the still-forming last candle (one whose interval has
+        not closed by ``until_ms``) is dropped. Public market data — no key needed.
+        '''
+        interval_ms = timeframe_to_seconds(timeframe) * 1000
+        collected: list[list[float]] = []
+        seen: set[int] = set()
+        cursor = since_ms
+        while cursor < until_ms:
+            page = self._fetch_ohlcv_page(symbol, timeframe, cursor)
+            if not page:
+                break
+            self._collect_closed(page, since_ms, until_ms, interval_ms, seen, collected)
+            next_cursor = int(page[-1][_CANDLE_TIME]) + interval_ms
+            if len(page) < c.SIM_FETCH_PAGE_LIMIT or next_cursor <= cursor:
+                break
+            cursor = next_cursor
+        return collected
+
+    def _fetch_ohlcv_page(self, symbol: str, timeframe: str, since_ms: int) -> list[list[float]]:
+        '''Fetch one page of candles starting at ``since_ms`` (idempotent read).'''
+        return self._request(
+            f'fetch ohlcv {symbol} {timeframe}',
+            lambda: self.client.fetch_ohlcv(symbol, timeframe, since_ms, c.SIM_FETCH_PAGE_LIMIT),
+        )
+
+    @staticmethod
+    def _collect_closed(
+        page: list[list[float]],
+        since_ms: int,
+        until_ms: int,
+        interval_ms: int,
+        seen: set[int],
+        out: list[list[float]],
+    ) -> None:
+        '''Append normalized, in-range, closed, not-yet-seen candles from ``page``.'''
+        for candle in page:
+            open_ms = int(candle[_CANDLE_TIME])
+            if open_ms < since_ms or open_ms + interval_ms > until_ms or open_ms in seen:
+                continue
+            seen.add(open_ms)
+            out.append(record_to_candle(candle_to_record(candle)))
 
     def create_order(
         self,

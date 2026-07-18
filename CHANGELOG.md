@@ -6,6 +6,26 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-18
+
+backtest engine — historical data foundation, deterministic replay, P&L reporting
+
+### Added
+- I-12: backtest data foundation — `simulation fetch <pair> --timeframe --start --end` downloads
+  historical OHLCV into an append-only, resumable store under `~/.ccbalancer/simulation/`
+  (`{exchange}/{symbol}/{timeframe}.jsonl` + sample-shaped `manifest.json` with coverage/gaps).
+  New `ExchangeStore.fetch_ohlcv_range` paginates ccxt and drops the still-forming candle; a
+  loader ingests the committed `data/simulation/` CSV/JSONL sample so backtests run offline.
+- I-13: deterministic backtest replay engine — `simulation run <pair> --start --end --capital`
+  replays stored candles, deciding on each closed bar via the pure `RebalanceManager.decide` and
+  resolving fills on the next bar that crosses the limit (no look-ahead), with a virtual balance,
+  maker `--fee-rate`, and precision/`--min-cost` enforcement. Writes an isolated per-run sim ledger
+  under `simulation/runs/{run_id}/`; identical inputs produce a byte-identical ledger.
+- I-14: backtest P&L report — `simulation report <run_id>` marks a completed run to its final candle
+  close and emits realized/unrealized/total P&L, ROI, fees, the per-trade timeline, and a per-year
+  breakdown (so a headline ROI can't hide cycle dependence). Offline; reuses the average-cost
+  `PerformanceManager` accounting.
+
 ## [0.3.0] - 2026-07-18
 
 ADX + support/resistance indicators; --help discoverability

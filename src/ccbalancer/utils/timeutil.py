@@ -11,7 +11,15 @@ from datetime import datetime, timezone
 
 from ccbalancer.exceptions import ConfigError
 
-__all__ = ['now_iso', 'now_ms', 'parse_iso', 'hours_between', 'timeframe_to_seconds', 'ms_to_iso']
+__all__ = [
+    'now_iso',
+    'now_ms',
+    'parse_iso',
+    'hours_between',
+    'timeframe_to_seconds',
+    'ms_to_iso',
+    'iso_to_ms',
+]
 
 # Suffix -> seconds for ccxt-style timeframe strings (e.g. ``15m``, ``4h``).
 _TIMEFRAME_UNITS = {
@@ -67,6 +75,21 @@ def timeframe_to_seconds(timeframe: str) -> int:
 def ms_to_iso(epoch_ms: int) -> str:
     '''Convert epoch milliseconds (ccxt candle time) to an ISO-8601 UTC string.'''
     return _format(datetime.fromtimestamp(epoch_ms / 1000, timezone.utc))
+
+
+def iso_to_ms(value: str) -> int:
+    '''Convert an ISO-8601 date or datetime to epoch milliseconds (UTC).
+
+    Accepts a bare date (``'2022-09-01'``, taken as UTC midnight) or a full
+    timestamp; naive inputs are assumed UTC, offset-aware inputs converted.
+
+    Raises:
+        ConfigError: If the value is not a valid ISO-8601 date/datetime.
+    '''
+    try:
+        return int(parse_iso(value).timestamp() * 1000)
+    except ValueError as exc:
+        raise ConfigError(f'Invalid date {value!r}; expected ISO-8601, e.g. 2022-09-01') from exc
 
 
 def _format(moment: datetime) -> str:

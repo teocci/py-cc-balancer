@@ -23,6 +23,19 @@ __all__ = [
     'FLAGS_FILENAME',
     'INDICATORS_FILENAME',
     'OHLCV_DIRNAME',
+    'SIMULATION_DIRNAME',
+    'SIM_OHLCV_DIRNAME',
+    'SIM_MANIFEST_FILENAME',
+    'SIM_FETCH_PAGE_LIMIT',
+    'SIM_DEFAULT_TIMEFRAMES',
+    'SIM_RUNS_DIRNAME',
+    'SIM_LEDGER_FILENAME',
+    'SIM_RUN_FILENAME',
+    'SIM_DEFAULT_DECISION_TIMEFRAME',
+    'SIM_DEFAULT_CAPITAL',
+    'SIM_DEFAULT_FEE_RATE',
+    'SIM_DEFAULT_AMOUNT_PRECISION',
+    'SIM_DEFAULT_MIN_COST',
     'ACCOUNTS_DIRNAME',
     'DEFAULT_ACCOUNT_SCOPE',
     'KILL_SWITCH_FILENAME',
@@ -115,6 +128,31 @@ FLAGS_FILENAME = 'flags.json'
 INDICATORS_FILENAME = 'indicators.toml'
 # Subdirectory under the app dir holding cached OHLCV candles for indicators.
 OHLCV_DIRNAME = 'ohlcv'
+# Backtest historical-data tree under the app dir: append-only, resumable OHLCV
+# per {exchange}/{symbol}/{timeframe}.jsonl plus a per-symbol manifest. Distinct
+# from OHLCV_DIRNAME (the overwrite-on-write indicator cache) — this one never
+# re-downloads a range, only appends the missing tail since the last closed candle.
+SIMULATION_DIRNAME = 'simulation'
+SIM_OHLCV_DIRNAME = 'ohlcv'
+SIM_MANIFEST_FILENAME = 'manifest.json'
+# ccxt page size for the paginated range fetch (venue max is typically 1000).
+SIM_FETCH_PAGE_LIMIT = 1000
+# Timeframes fetched by default for a full-cycle backtest (cheap to paginate);
+# sub-daily (1m/5m) is deferred to a later phase behind a REST-klines fetcher.
+SIM_DEFAULT_TIMEFRAMES = ('1h', '4h', '1d')
+# Backtest run artifacts under the simulation tree: one directory per run (keyed by
+# a deterministic hash of the run inputs) holding the isolated sim ledger + params.
+SIM_RUNS_DIRNAME = 'runs'
+SIM_LEDGER_FILENAME = 'ledger.jsonl'
+SIM_RUN_FILENAME = 'run.json'
+# Replay defaults. The MVP decides on the daily close; fee is a maker rate applied
+# to each simulated fill's notional; amount precision floors order sizing; min-cost
+# is the exchange-floor below which the sim rejects an order (0 = no floor).
+SIM_DEFAULT_DECISION_TIMEFRAME = '1d'
+SIM_DEFAULT_CAPITAL = 10000.0
+SIM_DEFAULT_FEE_RATE = 0.001
+SIM_DEFAULT_AMOUNT_PRECISION = 8
+SIM_DEFAULT_MIN_COST = 0.0
 # Per-account books live under <app_dir>/accounts/<account-id>/. Each account's
 # portfolio/state/ledger/decisions/flags are isolated by its stable id; the
 # no-account env-credential path uses the 'default' scope.
