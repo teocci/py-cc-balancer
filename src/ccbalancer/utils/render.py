@@ -29,6 +29,7 @@ if TYPE_CHECKING:
         PerformanceSnapshot,
         ProposedOrder,
         RebalanceDecision,
+        ReconcileResult,
         RegimeScenario,
         RegimeSignal,
         SimFetchResult,
@@ -60,6 +61,8 @@ __all__ = [
     'rebalance_exec_response',
     'orders_response',
     'cancel_response',
+    'reconcile_response',
+    'reconcile_lines',
     'sim_fetch_to_dict',
     'simulation_fetch_response',
     'simulation_fetch_lines',
@@ -584,6 +587,38 @@ def cancel_lines(orders: list[dict[str, object]], *, dry_run: bool) -> list[str]
     '''Render the orders that were (or, in dry-run, would be) cancelled.'''
     verb = 'would cancel' if dry_run else 'cancelled'
     return [f'{verb} {_open_order_line(order)}' for order in orders]
+
+
+def reconcile_result_to_dict(result: ReconcileResult) -> dict[str, object]:
+    '''Serialize one :class:`ReconcileResult` with a fixed key order.'''
+    return {
+        'symbol': result.symbol,
+        'client_order_id': result.client_order_id,
+        'order_id': result.order_id,
+        'status': result.status,
+        'newly_filled': result.newly_filled,
+        'total_filled': result.total_filled,
+        'remaining': result.remaining,
+    }
+
+
+def reconcile_response(
+    results: list[ReconcileResult], meta: dict[str, object]
+) -> dict[str, object]:
+    '''Build the `reconcile` envelope: per-order fills booked and current status.'''
+    return _envelope('reconcile', meta, {'reconciled': [reconcile_result_to_dict(r) for r in results]})
+
+
+def reconcile_lines(results: list[ReconcileResult]) -> list[str]:
+    '''Render one text line per reconciled order (only the informative ones).'''
+    lines = []
+    for result in results:
+        booked = f' +{result.newly_filled:g} filled' if result.newly_filled > 0 else ''
+        lines.append(
+            f'{result.symbol} {result.client_order_id} [{result.status}]'
+            f'{booked} ({result.total_filled:g}/{result.total_filled + result.remaining:g})'
+        )
+    return lines
 
 
 def indicator_catalog_lines(catalog: list[dict[str, object]]) -> list[str]:

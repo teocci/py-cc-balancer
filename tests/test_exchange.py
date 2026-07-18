@@ -55,6 +55,10 @@ class _RecordingClient:
         self.calls.append(('cancel_order', order_id, symbol))
         return {'id': order_id, 'status': 'canceled'}
 
+    def fetch_order(self, order_id, symbol=None):
+        self.calls.append(('fetch_order', order_id, symbol))
+        return {'id': order_id, 'status': 'closed', 'filled': 0.5, 'average': 100.0}
+
 
 class _RaisingClient:
     '''Raises a preset ccxt error from every call.'''
@@ -325,6 +329,47 @@ def test_fetch_ohlcv_range_empty_when_nothing_in_window():
     future = 2_000_000_000_000
 
     assert store.fetch_ohlcv_range('BTC/USDT', '1h', future, future + _HOUR_MS) == []
+
+
+def test_fetch_order_delegates_and_returns_status():
+    client = _RecordingClient()
+    store = _store_with(client)
+
+    result = store.fetch_order('order-9', 'BTC/USDT')
+
+    assert result == {'id': 'order-9', 'status': 'closed', 'filled': 0.5, 'average': 100.0}
+    assert ('fetch_order', 'order-9', 'BTC/USDT') in client.calls
+
+
+def test_fetch_order_is_retryable_on_transient_error(monkeypatch):
+    import ccxt
+
+    class _FlakyFetch:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def fetch_order(self, order_id, symbol=None):
+            self.calls += 1
+            if self.calls == 1:
+                raise ccxt.NetworkError('boom')
+            return {'id': order_id, 'status': 'open', 'filled': 0.0}
+
+    monkeypatch.setattr('time.sleep', lambda _s: None)
+    client = _FlakyFetch()
+    store = _store_with(client, retries=2)
+
+    assert store.fetch_order('id-1', 'BTC/USDT')['status'] == 'open'
+    assert client.calls == 2  # one transient failure, then success
+
+
+def test_find_order_by_client_id_matches_open_order():
+    store = FakeExchangeStore(open_orders=[
+        {'symbol': 'BTC/USDT', 'id': 'x1', 'clientOrderId': 'ccb-a'},
+        {'symbol': 'BTC/USDT', 'id': 'x2', 'clientOrderId': 'ccb-b'},
+    ])
+    found = store.find_order_by_client_id('ccb-b', 'BTC/USDT')
+    assert found['id'] == 'x2'
+    assert store.find_order_by_client_id('ccb-missing', 'BTC/USDT') is None
 
 
 def test_fake_exchange_records_orders(fake_exchange: FakeExchangeStore):

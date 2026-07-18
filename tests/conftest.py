@@ -131,6 +131,7 @@ class FakeExchangeStore:
         offline: bool = False,
         account_ref: str | None = None,
         exchange_id: str = 'binance',
+        order_status: dict[str, dict[str, object]] | None = None,
     ) -> None:
         self._account_ref = account_ref
         self.exchange_id = exchange_id
@@ -140,11 +141,15 @@ class FakeExchangeStore:
         self.open_orders = list(open_orders or [])
         self.ohlcv = ohlcv or {}
         self.offline = offline
+        # order_id -> ccxt order status dict returned by fetch_order (programmable
+        # per test to drive reconciliation: filled/average/status/fee).
+        self.order_status = dict(order_status or {})
         self.created: list[dict[str, object]] = []
         self.cancelled: list[dict[str, object]] = []
         self.markets_loaded = 0
         self.ohlcv_calls: list[tuple[str, str, int]] = []
         self.range_calls: list[tuple[str, str, int, int]] = []
+        self.order_status_calls: list[tuple[str, str | None]] = []
 
     def load_markets(self, reload: bool = False) -> dict[str, object]:
         self.markets_loaded += 1
@@ -171,6 +176,23 @@ class FakeExchangeStore:
         if symbol is None:
             return list(self.open_orders)
         return [order for order in self.open_orders if order.get('symbol') == symbol]
+
+    def fetch_order(self, order_id: str, symbol: str | None = None) -> dict[str, object]:
+        self.order_status_calls.append((order_id, symbol))
+        if self.offline:
+            raise ExchangeError(f'offline: cannot fetch order {order_id}')
+        try:
+            return dict(self.order_status[order_id])
+        except KeyError as exc:
+            raise ExchangeError(f'No order {order_id}') from exc
+
+    def find_order_by_client_id(
+        self, client_order_id: str, symbol: str | None = None
+    ) -> dict[str, object] | None:
+        for order in self.fetch_open_orders(symbol):
+            if order.get('clientOrderId') == client_order_id:
+                return order
+        return None
 
     def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int) -> list[list[float]]:
         self.ohlcv_calls.append((symbol, timeframe, limit))
@@ -199,8 +221,9 @@ class FakeExchangeStore:
         price: float,
         client_order_id: str | None = None,
     ) -> dict[str, object]:
+        order_id = f'fake-{len(self.created) + 1}'
         order = {
-            'id': f'fake-{len(self.created) + 1}',
+            'id': order_id,
             'symbol': symbol,
             'type': 'limit',
             'side': side.value,
@@ -209,6 +232,12 @@ class FakeExchangeStore:
             'clientOrderId': client_order_id,
         }
         self.created.append(order)
+        # Mirror a real venue: a freshly placed maker order rests (open, filled 0),
+        # so a post-create fetch_order resolves. Tests can override order_status to
+        # simulate an immediate fill.
+        self.order_status.setdefault(
+            order_id, {'id': order_id, 'status': 'open', 'filled': 0.0, 'average': None}
+        )
         return order
 
     def cancel_order(self, order_id: str, symbol: str | None = None) -> dict[str, object]:

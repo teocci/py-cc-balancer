@@ -17,9 +17,12 @@ from ccbalancer.managers.execution_manager import (
     kill_switch_active,
     session_notional,
 )
+from ccbalancer.enums.order_status import OrderStatus
+from ccbalancer.managers.reconciliation_manager import ReconciliationManager
 from ccbalancer.models import ProposedOrder, RebalanceDecision
 from ccbalancer.stores.decision_store import DecisionStore
 from ccbalancer.stores.ledger_store import LedgerStore
+from ccbalancer.stores.order_store import OrderStore
 from ccbalancer.stores.state_store import StateStore
 
 from .conftest import FakeExchangeStore
@@ -44,11 +47,22 @@ def _hold(symbol='ETH/USDT') -> RebalanceDecision:
 
 
 def _manager(tmp_path, exchange) -> ExecutionManager:
+    state = StateStore(tmp_path / 'state.json', tmp_path / 'history.jsonl')
+    order_store = OrderStore(tmp_path / 'open_orders.json')
+    reconciler = ReconciliationManager(
+        exchange=exchange,
+        order_store=order_store,
+        ledger_store=LedgerStore(tmp_path / 'ledger.jsonl'),
+        state_store=state,
+        exchange_id='bybit',
+        testnet=True,
+    )
     return ExecutionManager(
         exchange=exchange,
-        state_store=StateStore(tmp_path / 'state.json', tmp_path / 'history.jsonl'),
-        ledger_store=LedgerStore(tmp_path / 'ledger.jsonl'),
+        state_store=state,
+        order_store=order_store,
         decision_store=DecisionStore(tmp_path / 'decision_log.jsonl'),
+        reconciler=reconciler,
         exchange_id='bybit',
         testnet=True,
     )
@@ -96,16 +110,42 @@ def test_is_ours_detects_prefix():
 # --- execute --------------------------------------------------------------
 
 
-def test_execute_places_tagged_order_and_persists(tmp_path, fake_exchange):
+def test_execute_places_tagged_order_and_tracks_pending_without_booking_a_fill(tmp_path, fake_exchange):
+    # F-6: a resting maker order must NOT be booked as a fill on submission. It is
+    # tracked pending; reconciliation books the real fill later.
     manager = _manager(tmp_path, fake_exchange)
     results = manager.execute([_ok()], now=_NOW)
     assert results[0].placed is True
     assert results[0].status == 'submitted'
     placed = fake_exchange.created[0]
     assert placed['clientOrderId'].startswith(CCB_PREFIX)
-    assert (tmp_path / 'state.json').is_file()
-    assert (tmp_path / 'history.jsonl').is_file()
-    assert LedgerStore(tmp_path / 'ledger.jsonl').load()[0]['qty'] == pytest.approx(0.12)
+    # No fabricated fill: the ledger stays empty until a real fill is reconciled.
+    assert LedgerStore(tmp_path / 'ledger.jsonl').load() == []
+    # The order is tracked write-ahead for reconciliation (confirmed open, nothing booked).
+    tracked = OrderStore(tmp_path / 'open_orders.json').list('BTC/USDT')
+    assert len(tracked) == 1
+    assert tracked[0].status is OrderStatus.OPEN
+    assert tracked[0].filled_booked == 0.0
+    assert tracked[0].order_id == placed['id']
+
+
+def test_execute_books_fill_when_order_fills_on_placement(tmp_path):
+    # A marketable order that fills immediately is captured by the post-place reconcile.
+    exchange = FakeExchangeStore(
+        markets={'BTC/USDT': {'active': True}},
+        tickers={'BTC/USDT': {'last': 50000.0, 'bid': 49990.0, 'ask': 50010.0}},
+    )
+    manager = _manager(tmp_path, exchange)
+    manager.execute([_ok(amount=0.12, price=50000.0)], now=_NOW)
+    # Override the freshly-created order's status to a full fill, then reconcile.
+    order_id = exchange.created[0]['id']
+    exchange.order_status[order_id] = {'id': order_id, 'status': 'closed', 'filled': 0.12,
+                                       'average': 50000.0}
+    manager.reconciler.reconcile(now=_NOW)
+
+    fills = LedgerStore(tmp_path / 'ledger.jsonl').load()
+    assert len(fills) == 1 and fills[0]['qty'] == pytest.approx(0.12)
+    assert OrderStore(tmp_path / 'open_orders.json').list() == []  # terminal -> dropped
 
 
 def test_execute_logs_decision_for_every_pair(tmp_path, fake_exchange):
@@ -152,6 +192,29 @@ def test_execute_records_failure_without_persisting(tmp_path):
     assert results[0].placed is False
     assert not (tmp_path / 'state.json').exists()
     assert not (tmp_path / 'ledger.jsonl').exists()
+    # A rejected order never reached the book: the write-ahead record is removed.
+    assert OrderStore(tmp_path / 'open_orders.json').list() == []
+
+
+def test_execute_leaves_unconfirmed_record_on_network_error(tmp_path):
+    from ccbalancer.exceptions import ExchangeError
+
+    class _Timeout(FakeExchangeStore):
+        def create_order(self, *args, **kwargs):
+            raise ExchangeError('timeout')
+
+    exchange = _Timeout(
+        markets={'BTC/USDT': {'active': True}},
+        tickers={'BTC/USDT': {'last': 50000.0, 'bid': 49990.0, 'ask': 50010.0}},
+    )
+    results = _manager(tmp_path, exchange).execute([_ok()], now=_NOW)
+
+    assert results[0].status == 'unconfirmed'
+    assert results[0].placed is False
+    # Left tracked (write-ahead) so reconcile can resolve it by client-order-id.
+    tracked = OrderStore(tmp_path / 'open_orders.json').list()
+    assert len(tracked) == 1 and tracked[0].status is OrderStatus.UNCONFIRMED
+    assert LedgerStore(tmp_path / 'ledger.jsonl').load() == []
 
 
 def test_owned_open_orders_filters_by_symbol_and_ownership(tmp_path):

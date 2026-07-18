@@ -1,9 +1,9 @@
 # PROGRESS
 
-**Current version:** 0.5.0
-**Active phase:** `v0.5.0` backtest sub-daily + docs — I-15 (sub-daily 1m/5m + Binance REST fallback,
-multi-timeframe fills), I-16 (backtest docs + live smoke-test runbook). 526 tests. Plan complete — all
-rows released. See `docs/phases/phase-20.md`…`phase-21.md`, `docs/improvements/I-15.md`…`I-16.md`.
+**Current version:** 0.5.1
+**Active phase:** `v0.5.1` live order-status reconciliation (F-6) — two-phase booking (write-ahead
+pending store + `reconcile` command + auto-reconcile in `rebalance`); no fill fabricated on submission.
+551 tests. Plan complete — all rows released. See `docs/phases/phase-22.md`, `docs/fixes/F-6.md`.
 
 ## Phase status
 
@@ -32,6 +32,7 @@ rows released. See `docs/phases/phase-20.md`…`phase-21.md`, `docs/improvements
 | 19 | Backtest reporting | done |
 | 20 | Sub-daily timeframes + Binance fallback fetcher | done |
 | 21 | Backtest docs + live smoke-test runbook | done |
+| 22 | Live order-status reconciliation (F-6) | done |
 
 > **Redefinition (2026-06-18):** the project was re-scoped from a pure rebalancer into an agent
 > decision-support tool (read-only market intelligence + deterministic execution + offline memory).
@@ -40,12 +41,22 @@ rows released. See `docs/phases/phase-20.md`…`phase-21.md`, `docs/improvements
 
 ## Next action
 
-`v0.5.0` cut (R3 = P-20/P-21: sub-daily timeframes + Binance REST fallback, multi-timeframe fills, and
-honest backtest docs + a capped live smoke-test runbook). **The plan is complete — every row is
-released.** Next: drain the `feat/sim-backtest` branch (it integrates to `main` per release) and reset
-`docs/PLAN.md` to the no-active-plan stub; then scope a new plan. Deferred backlog: the deferred
-live-execution reconciliation fix (F-6), the multi-timeframe MTFA strategy layer (see `docs/trading/`),
-MCP server, DEX adapter.
+**v0.5.1** cut (P-22 / F-6: live order-status reconciliation). **Plan complete — every row released.**
+Next: integrate `fix/f-6-exec-reconciliation` to `main` + tag v0.5.1 (release step), then it can be
+pruned along with the merged `feat/sim-backtest`; reset `docs/PLAN.md` to the no-active-plan stub for the
+next plan. Deferred backlog: the multi-timeframe MTFA strategy layer (see `docs/trading/`), MCP server,
+DEX adapter. **F-6 is not yet live-verified** — run the capped `docs/live-smoke-test.md` on a real venue
+before trusting live execution.
+
+> Phase 22 (done): live order-status reconciliation (F-6). Live `rebalance --execute` no longer books a
+> fabricated full fill at submission. Placement is recorded write-ahead in a new per-account
+> `open_orders.json` (`stores/order_store.py`, keyed by client-order-id) with **no** fill booked; the new
+> `managers/reconciliation_manager.py` books only real fills from exchange status (`ExchangeStore.fetch_order`
+> + client-order-id lookup), delta-booking partials without double-count and resolving the create-timeout
+> ambiguity. Exposed as a `reconcile [--pair …]` command (write; not kill-switch-blocked) and auto-run at
+> the start of each `rebalance` before cancel-and-replace; `last_rebalance_at` now advances on a real fill.
+> `execution_manager` lost its fabricated `_fill`/`_persist`. 551 tests. Closes R1 → v0.5.1 (fix-only →
+> patch). See `docs/phases/phase-22.md`, `docs/fixes/F-6.md`.
 
 > Phase 21 (done): backtest docs + live smoke-test runbook (I-16). Docs-only. `DESIGN.md` gained a
 > *Backtest engine (offline)* section (fetch → replay → report, the dedicated replay loop, the

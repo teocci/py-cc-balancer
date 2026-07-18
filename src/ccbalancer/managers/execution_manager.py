@@ -1,11 +1,18 @@
 '''Order execution and the safety guardrails around it.
 
 :class:`ExecutionManager` turns a list of :class:`RebalanceDecision` objects into
-placed orders, following the cancel-and-replace flow from DESIGN.md: cancel our own
-stale ``CCB_PREFIX`` orders, place a tagged limit order per actionable decision, and
-persist the outcome to ``state.json`` + ``history.jsonl`` + ``ledger.jsonl`` (plus a
-``rebalance`` decision-log record). It owns no decision logic — the decisions are
-computed upstream by the rebalance manager — and never imports ccxt.
+placed orders, following the cancel-and-replace flow from DESIGN.md: reconcile any
+outstanding orders (book real fills), cancel our own stale ``CCB_PREFIX`` orders,
+then place a tagged limit order per actionable decision. It owns no decision logic —
+the decisions are computed upstream by the rebalance manager — and never imports ccxt.
+
+Fills are **not** booked at submission (that was the F-6 bug: a resting maker order
+recorded as a full fill at the limit price). Instead each placement is written
+*write-ahead* to the :class:`~ccbalancer.stores.order_store.OrderStore` (keyed by its
+deterministic client-order-id, so a ``create_order`` timeout is never lost), and real
+fills are booked only by the :class:`~ccbalancer.managers.reconciliation_manager.ReconciliationManager`
+— run at the start of each ``execute`` (before cancel-and-replace, so partials are
+booked before the remainder is cancelled) and by the standalone ``reconcile`` command.
 
 The module also exposes the three *pure* guard helpers the CLI enforces before any
 order is placed: :func:`confirm_token` (the intent-level handshake issued by ``plan``
@@ -21,20 +28,20 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ccbalancer import constants as c
-from ccbalancer.exceptions import InsufficientBalanceError, OrderRejectedError
+from ccbalancer.enums.order_status import OrderStatus
+from ccbalancer.exceptions import ExchangeError, InsufficientBalanceError, OrderRejectedError
 from ccbalancer.models import (
     ExecutionResult,
-    Fill,
-    HistoryEvent,
+    OpenOrder,
     ProposedOrder,
     RebalanceDecision,
-    RebalanceState,
 )
 
 if TYPE_CHECKING:
+    from ccbalancer.managers.reconciliation_manager import ReconciliationManager
     from ccbalancer.stores.decision_store import DecisionStore
     from ccbalancer.stores.exchange import ExchangeStore
-    from ccbalancer.stores.ledger_store import LedgerStore
+    from ccbalancer.stores.order_store import OrderStore
     from ccbalancer.stores.state_store import StateStore
 
 __all__ = [
@@ -46,6 +53,7 @@ __all__ = [
 ]
 
 _SUBMITTED = 'submitted'
+_UNCONFIRMED = 'unconfirmed'
 _SKIPPED = 'skipped'
 _FAILED = 'failed'
 
@@ -95,32 +103,37 @@ def is_ours(order: dict[str, object]) -> bool:
 
 @dataclass(slots=True)
 class ExecutionManager:
-    '''Place and cancel orders, persisting state, history, and fills.
+    '''Place and cancel orders; reconcile books the fills.
 
     Attributes:
         exchange: Exchange store used to load markets, cancel, and place orders.
-        state_store: Persists ``state.json`` and ``history.jsonl``.
-        ledger_store: Appends executed fills to ``ledger.jsonl``.
+        state_store: Persists ``state.json`` and ``history.jsonl`` (via reconcile).
+        order_store: Tracks outstanding orders write-ahead for reconciliation.
         decision_store: Appends the ``rebalance`` decision-log records.
+        reconciler: Books real fills from exchange status (run before placement).
         exchange_id: ccxt exchange id, stamped onto records.
         testnet: Whether the sandbox is in effect, stamped onto records.
     '''
 
     exchange: ExchangeStore
     state_store: StateStore
-    ledger_store: LedgerStore
+    order_store: OrderStore
     decision_store: DecisionStore
+    reconciler: ReconciliationManager
     exchange_id: str
     testnet: bool
 
     def execute(self, decisions: list[RebalanceDecision], *, now: str) -> list[ExecutionResult]:
-        '''Cancel stale orders, then place one order per actionable decision.
+        '''Reconcile, cancel stale orders, then place one order per actionable decision.
 
-        Persists a decision-log record for every decision and, for each placed
-        order, the resulting state, history event, and ledger fill. Re-running is
-        idempotent: our own leftover orders are cancelled before re-placing.
+        Reconciliation runs first so a partial fill on an outstanding order is booked
+        before that order is cancelled and re-placed. Each placement is recorded
+        write-ahead; the fill itself is booked by reconciliation, never on submission.
+        Re-running is idempotent: leftover orders are reconciled then cancelled before
+        re-placing.
         '''
         self.exchange.load_markets()
+        self.reconciler.reconcile(now=now)
         actionable = [d for d in decisions if d.rebalance and d.proposed_order is not None]
         self.cancel_orders(self.owned_open_orders([d.symbol for d in actionable]))
         return [self._act(decision, now=now, index=index) for index, decision in enumerate(decisions)]
@@ -156,28 +169,40 @@ class ExecutionManager:
     def _place(
         self, decision: RebalanceDecision, order: ProposedOrder, *, now: str, index: int
     ) -> ExecutionResult:
+        '''Place one order write-ahead; the fill is booked later by reconciliation.'''
         coid = self._client_order_id(now, index)
+        self.order_store.put(self._pending(coid, order, OrderStatus.UNCONFIRMED, None, now))
         try:
             response = self.exchange.create_order(
                 order.symbol, order.side, order.amount, order.limit_price, coid
             )
         except (OrderRejectedError, InsufficientBalanceError) as exc:
+            self.order_store.remove(coid)  # never reached the book — stop tracking it
             return self._result(decision, order, None, _FAILED, str(exc))
+        except ExchangeError as exc:
+            # Outcome unknown (network/timeout): leave the write-ahead record so
+            # reconcile can resolve it by client-order-id on a later pass.
+            return self._result(decision, order, None, _UNCONFIRMED, f'{exc}; run `reconcile`')
         order_id = _opt_str(response.get('id'))
-        self._persist(decision, order, response, order_id, now)
+        self.order_store.put(self._pending(coid, order, OrderStatus.OPEN, order_id, now))
+        # Capture an order that filled on placement (marketable); a resting order books nothing.
+        self.reconciler.reconcile([order.symbol], now=now)
         return self._result(decision, order, order_id, _SUBMITTED, decision.detail)
 
-    def _persist(
-        self,
-        decision: RebalanceDecision,
-        order: ProposedOrder,
-        response: dict[str, object],
-        order_id: str | None,
-        now: str,
-    ) -> None:
-        self.ledger_store.append_fill(_fill(order, response, order_id, now))
-        self.state_store.record(
-            _state(decision, order, now), _event(decision, order, order_id, now, self.exchange_id, self.testnet)
+    @staticmethod
+    def _pending(
+        coid: str, order: ProposedOrder, status: OrderStatus, order_id: str | None, now: str
+    ) -> OpenOrder:
+        return OpenOrder(
+            client_order_id=coid,
+            order_id=order_id,
+            symbol=order.symbol,
+            side=order.side.value,
+            amount=order.amount,
+            limit_price=order.limit_price,
+            status=status,
+            filled_booked=0.0,
+            placed_at=now,
         )
 
     def _client_order_id(self, now: str, index: int) -> str:
@@ -204,65 +229,6 @@ class ExecutionManager:
             price=order.limit_price,
             notional=order.notional,
         )
-
-
-def _fill(order: ProposedOrder, response: dict[str, object], order_id: str | None, now: str) -> Fill:
-    fee = response.get('fee') if isinstance(response.get('fee'), dict) else {}
-    return Fill(
-        ts=now,
-        symbol=order.symbol,
-        side=order.side.value,
-        price=_num(response.get('average'), order.limit_price) or order.limit_price,
-        qty=_num(response.get('filled'), order.amount) or order.amount,
-        fee=_num(fee.get('cost')),
-        fee_currency=_opt_str(fee.get('currency')),
-        order_id=order_id,
-    )
-
-
-def _state(decision: RebalanceDecision, order: ProposedOrder, now: str) -> RebalanceState:
-    return RebalanceState(
-        symbol=order.symbol,
-        last_rebalance_at=now,
-        last_side=order.side.value,
-        last_amount=order.amount,
-        last_price=order.limit_price,
-        last_drift_pct=decision.drift_pct,
-        last_reason=decision.reason.value,
-    )
-
-
-def _event(
-    decision: RebalanceDecision,
-    order: ProposedOrder,
-    order_id: str | None,
-    now: str,
-    exchange_id: str,
-    testnet: bool,
-) -> HistoryEvent:
-    return HistoryEvent(
-        ts=now,
-        symbol=order.symbol,
-        side=order.side.value,
-        amount=order.amount,
-        price=order.limit_price,
-        notional=order.notional,
-        drift_pct=decision.drift_pct,
-        reason=decision.reason.value,
-        exchange=exchange_id,
-        testnet=testnet,
-        order_id=order_id,
-        status=_SUBMITTED,
-    )
-
-
-def _num(value: object, fallback: float = 0.0) -> float:
-    if value is None:
-        return fallback
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return fallback
 
 
 def _opt_str(value: object) -> str | None:

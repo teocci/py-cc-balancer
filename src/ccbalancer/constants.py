@@ -20,6 +20,7 @@ __all__ = [
     'HISTORY_FILENAME',
     'DECISION_LOG_FILENAME',
     'LEDGER_FILENAME',
+    'OPEN_ORDERS_FILENAME',
     'FLAGS_FILENAME',
     'INDICATORS_FILENAME',
     'OHLCV_DIRNAME',
@@ -129,6 +130,9 @@ HISTORY_FILENAME = 'history.jsonl'
 DECISION_LOG_FILENAME = 'decision_log.jsonl'
 # Append-only log of executed fills (price, qty, fee, side); the cost-basis source.
 LEDGER_FILENAME = 'ledger.jsonl'
+# Outstanding orders awaiting reconciliation (keyed by client-order-id); written
+# write-ahead at placement, drained as the reconciler books their real fills (F-6).
+OPEN_ORDERS_FILENAME = 'open_orders.json'
 # Agent/user milestones and watch-conditions, managed by the `flag` commands.
 FLAGS_FILENAME = 'flags.json'
 # Indicator parameter overrides, kept out of config.toml (own concern, safely

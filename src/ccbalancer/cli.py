@@ -28,6 +28,7 @@ from ccbalancer.constants import (
     MILESTONE_METRICS,
     MILESTONE_OPS,
     OHLCV_DIRNAME,
+    OPEN_ORDERS_FILENAME,
     PORTFOLIO_FILENAME,
     SIM_DEFAULT_AMOUNT_PRECISION,
     SIM_DEFAULT_CAPITAL,
@@ -61,6 +62,7 @@ from ccbalancer.managers.indicators_manager import IndicatorsManager
 from ccbalancer.managers.performance_manager import PerformanceManager, portfolio_totals
 from ccbalancer.managers.portfolio_manager import PortfolioManager
 from ccbalancer.managers.rebalance_manager import RebalanceManager
+from ccbalancer.managers.reconciliation_manager import ReconciliationManager
 from ccbalancer.managers.regime_manager import RegimeManager
 from ccbalancer.managers.simulation_manager import SimulationManager
 from ccbalancer.managers.simulation_report_manager import SimulationReportManager
@@ -73,6 +75,7 @@ from ccbalancer.stores.flags_store import FlagsStore
 from ccbalancer.stores.history_fetch import BinanceHistoryFetch
 from ccbalancer.stores.ledger_store import LedgerStore
 from ccbalancer.stores.market_cache import MarketCache
+from ccbalancer.stores.order_store import OrderStore
 from ccbalancer.stores.portfolio_store import PortfolioStore, pair_to_dict
 from ccbalancer.stores.simulation_store import SimulationStore
 from ccbalancer.stores.state_store import StateStore
@@ -104,7 +107,7 @@ _COMMAND_TAXONOMY = '''command categories:
   read  (live, network):      status, plan, analyze, performance, regime, orders, flag list, auth status
   read  (local, no network):  version, indicator list, pair list, config show, auth list, auth whoami
   write (data):               simulation fetch (network), simulation run (local backtest)
-  write (state / orders):     rebalance, cancel, pair add|set|remove, indicator set, flag add|remove, config init
+  write (state / orders):     rebalance, cancel, reconcile, pair add|set|remove, indicator set, flag add|remove, config init
   write (credentials):        auth login|logout|use|rename
   audit (local logs):         decisions, history, performance --history, export, simulation report
 
@@ -172,6 +175,10 @@ def _add_execution_commands(subparsers: argparse._SubParsersAction, trade: list[
         'cancel', parents=trade, help='Cancel this tool\'s open orders (dry-run by default).'
     )
     cancel.add_argument('--execute', action='store_true', help='Actually cancel (default: dry-run).')
+    subparsers.add_parser(
+        'reconcile', parents=trade,
+        help='Book actual fills for outstanding orders against exchange status (no orders placed).',
+    )
 
 
 def _add_performance_command(subparsers: argparse._SubParsersAction, trade: list[argparse.ArgumentParser]) -> None:
@@ -495,6 +502,8 @@ def _dispatch(args: argparse.Namespace) -> ExitCode:
         return _cmd_orders(args)
     if args.command == 'cancel':
         return _cmd_cancel(args)
+    if args.command == 'reconcile':
+        return _cmd_reconcile(args)
     if args.command == 'performance':
         return _cmd_performance(args)
     if args.command == 'regime':
@@ -650,6 +659,19 @@ def _cmd_cancel(args: argparse.Namespace) -> ExitCode:
     return ExitCode.OK
 
 
+def _cmd_reconcile(args: argparse.Namespace) -> ExitCode:
+    config = _load_config(args)
+    config_mod.require_credentials(config)
+    exchange = _exchange_store(config)
+    state = StateStore(config.data_dir / STATE_FILENAME, config.data_dir / HISTORY_FILENAME)
+    manager = _build_reconciliation_manager(config, exchange, state)
+    symbols = [s.upper() for s in args.pair] if args.pair else None
+    results = manager.reconcile(symbols, now=now_iso())
+    _emit(args, render.reconcile_response(results, _live_meta(config)),
+          render.reconcile_lines(results) or ['(no orders to reconcile)'])
+    return ExitCode.OK
+
+
 def _execution_context(
     config: config_mod.AppConfig, requested: list[str] | None
 ) -> tuple[list[PairConfig], PortfolioManager, RebalanceManager, ExchangeStore, StateStore]:
@@ -667,8 +689,22 @@ def _build_execution_manager(
     return ExecutionManager(
         exchange=exchange,
         state_store=state,
-        ledger_store=LedgerStore(config.data_dir / LEDGER_FILENAME),
+        order_store=OrderStore(config.data_dir / OPEN_ORDERS_FILENAME),
         decision_store=DecisionStore(config.data_dir / DECISION_LOG_FILENAME),
+        reconciler=_build_reconciliation_manager(config, exchange, state),
+        exchange_id=config.exchange,
+        testnet=config.testnet,
+    )
+
+
+def _build_reconciliation_manager(
+    config: config_mod.AppConfig, exchange: ExchangeStore, state: StateStore
+) -> ReconciliationManager:
+    return ReconciliationManager(
+        exchange=exchange,
+        order_store=OrderStore(config.data_dir / OPEN_ORDERS_FILENAME),
+        ledger_store=LedgerStore(config.data_dir / LEDGER_FILENAME),
+        state_store=state,
         exchange_id=config.exchange,
         testnet=config.testnet,
     )

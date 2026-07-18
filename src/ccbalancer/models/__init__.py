@@ -8,8 +8,10 @@ from ccbalancer.models.decision import ProposedOrder, RebalanceDecision
 from ccbalancer.models.fill import Fill
 from ccbalancer.models.indicators import IndicatorSnapshot
 from ccbalancer.models.milestone import Milestone
+from ccbalancer.models.open_order import OpenOrder
 from ccbalancer.models.pair_config import PairConfig
 from ccbalancer.models.performance import PerformanceSnapshot
+from ccbalancer.models.reconcile import ReconcileResult
 from ccbalancer.models.regime import RegimeScenario, RegimeSignal
 from ccbalancer.models.result import ExecutionResult
 from ccbalancer.models.sim_fetch import SimFetchResult
@@ -28,6 +30,8 @@ __all__ = [
     'RegimeScenario',
     'RegimeSignal',
     'Milestone',
+    'OpenOrder',
+    'ReconcileResult',
     'RebalanceState',
     'HistoryEvent',
     'ExecutionResult',

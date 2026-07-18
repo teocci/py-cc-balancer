@@ -121,6 +121,31 @@ class ExchangeStore:
         '''Return open orders, optionally restricted to ``symbol``.'''
         return self._request('fetch open orders', lambda: self.client.fetch_open_orders(symbol))
 
+    def fetch_order(self, order_id: str, symbol: str | None = None) -> dict[str, object]:
+        '''Return the current status of ``order_id`` (filled/average/status/fee).
+
+        An idempotent read, so it retries transient failures like the other reads.
+        Used by reconciliation to book only fills that actually occurred.
+        '''
+        return self._request(
+            f'fetch order {order_id}', lambda: self.client.fetch_order(order_id, symbol)
+        )
+
+    def find_order_by_client_id(
+        self, client_order_id: str, symbol: str | None = None
+    ) -> dict[str, object] | None:
+        '''Return our open order matching ``client_order_id``, or ``None``.
+
+        Resolves a placement whose exchange id is unknown (e.g. a ``create_order``
+        timeout) by scanning open orders for the deterministic client-order-id. A
+        resting order is found here; one that already closed has left the open list
+        and is left for the caller to handle.
+        '''
+        for order in self.fetch_open_orders(symbol):
+            if order.get('clientOrderId') == client_order_id:
+                return order
+        return None
+
     def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int) -> list[list[float]]:
         '''Return up to ``limit`` ``[time, open, high, low, close, volume]`` candles.
 

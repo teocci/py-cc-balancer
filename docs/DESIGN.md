@@ -139,11 +139,21 @@ root-level book files into the active account's directory.
 Ordered guards, first failure wins: `ABNORMAL_PRICE` → `MARKET_UNAVAILABLE` → `TOO_SOON` (optional) →
 `WITHIN_BAND` → `BELOW_MIN_NOTIONAL` → `INSUFFICIENT_BALANCE` → max-trade clamp → `OK`.
 
-## Execution (cancel-and-replace)
+## Execution (cancel-and-replace) + reconciliation
 
-`load_markets` → cancel open `CCB_PREFIX` orders → snapshot → `decide` → place limit (BUY at bid / SELL
-at ask ± `limit_offset_pct`) tagged with `CCB_PREFIX` → persist `state.json` + append `history.jsonl`.
-Idempotent: re-run cancels its own leftovers and re-places.
+`load_markets` → **reconcile outstanding orders** → cancel open `CCB_PREFIX` orders → snapshot →
+`decide` → place limit (BUY at bid / SELL at ask ± `limit_offset_pct`) tagged with `CCB_PREFIX`.
+Idempotent: re-run reconciles, cancels its own leftovers, and re-places.
+
+**Fills are booked from real order status, never on submission** (F-6). A maker limit order usually
+*rests* (`open`, `filled:0`), so booking it as a full fill at the limit price the moment it is placed
+fabricates a trade and diverges the local books. Instead placement is recorded *write-ahead* in
+`stores/order_store.py` (`open_orders.json`, keyed by the deterministic client-order-id, so a
+`create_order` timeout is never lost), and `managers/reconciliation_manager.py` books only the *delta*
+of what actually filled — reading `fetch_order`, handling partial fills without double-booking, and
+resolving an unconfirmed placement by its client-order-id. Reconciliation runs at the start of each
+`rebalance` (before cancel-and-replace, so a partial is booked before the remainder is cancelled) and
+on demand via the `reconcile` command. `last_rebalance_at` advances on a real fill, not on placement.
 
 ## Backtest engine (offline)
 
@@ -179,9 +189,10 @@ what makes it deterministic and testable without hitting an exchange.
 - **read** (live data, no side effects): `status` · `plan` · `analyze <pair> [--timeframe ...]` ·
   `indicator list` · `performance [--pair]` · `regime [--pair]` · `orders` · `version`
 - **write** (mutate state / place orders / fetch data; dry-run by default where it places orders,
-  guarded): `rebalance` · `cancel` · `pair (list/add/set/remove)` · `indicator set` ·
-  `flag (add/list/remove)` · `config (show/init)` · `auth (login/logout/list/use/status/whoami)` ·
-  `simulation fetch` (network → data store) · `simulation run` (local backtest, compute only)
+  guarded): `rebalance` · `cancel` · `reconcile` (book real fills; places no orders) ·
+  `pair (list/add/set/remove)` · `indicator set` · `flag (add/list/remove)` · `config (show/init)` ·
+  `auth (login/logout/list/use/status/whoami)` · `simulation fetch` (network → data store) ·
+  `simulation run` (local backtest, compute only)
 - **audit** (local logs only, no network, no side effects): `decisions` · `history` ·
   `performance --history` · `export` · `simulation report`
 

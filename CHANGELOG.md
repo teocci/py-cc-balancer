@@ -6,6 +6,19 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-19
+
+live order-status reconciliation — book only real fills, never on submission (F-6)
+
+### Fixed
+- F-6: live `rebalance --execute` no longer records a fill that never happened. A resting maker limit
+  order was booked as a full fill at the limit price on submission, diverging `ledger.jsonl`/`state.json`
+  from reality. Placement is now recorded write-ahead in a per-account `open_orders.json` (no fill on
+  submission); real fills are booked only from exchange order status by the new `reconcile` command,
+  which also runs automatically at the start of each `rebalance` (before cancel-and-replace). Handles
+  partial fills (delta-booked, no double-count) and the `create_order` timeout ambiguity (resolved by
+  client-order-id). `last_rebalance_at` now advances on a real fill, not on placement.
+
 ## [0.5.0] - 2026-07-18
 
 backtest sub-daily timeframes + Binance REST fallback, multi-timeframe fills, backtest docs & live smoke-test runbook
