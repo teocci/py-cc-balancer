@@ -25,6 +25,9 @@ cut the release (Part B). Deterministic bookkeeping runs in `scripts/`; you writ
 **Read first:** the base conventions at `../phase-flow/references/conventions.md` and the project
 overrides at `docs/conventions/tracking.md`. Do **not** restate paths/formats here — they live there.
 
+**Shared library:** the scripts import `tracklib` from the `phase-lib` skill via a uniform bootstrap
+— see `../phase-lib/SKILL.md`.
+
 ## Preconditions
 - All tests pass: run the project `test_cmd` from `tracking.md` (here: `.venv/Scripts/python -m pytest tests/ -v`). **Never finalize on red.**
 - The phase's code + live testing are done.
@@ -43,6 +46,11 @@ overrides at `docs/conventions/tracking.md`. Do **not** restate paths/formats he
 If this phase does **not** close its release group (batched cadence), stop here — the release comes when the last phase in the group finishes.
 
 ## Part B — cut the release (only when this phase closes its release group)
+> **Branch precondition (conventions §7b):** the release tag is cut on `<RELEASE_BRANCH>`. In
+> `branch` mode you finalize on the plan branch (steps 4–6) and **integrate to `<RELEASE_BRANCH>` in
+> step 7**; in `trunk` mode you are already on `<RELEASE_BRANCH>`. Do the coherence gate (step 6) on
+> the plan branch, before the switch.
+
 4. **Compute the version** off the current `__version__` using the map (conventions §5): any improvement/feature/greenfield phase in the release → **minor**; fix-only → **patch**; a fix riding an improvement inherits the minor.
 5. **Run the release bookkeeping** (bumps `src/ccbalancer/__init__.py` only — never `pyproject.toml`; rolls CHANGELOG; prepends the RELEASE.md row; stamps every detail file; done-marks the item indexes; marks PLAN rows `released`; updates PROGRESS `**Current version:**`):
    ```bash
@@ -56,14 +64,27 @@ If this phase does **not** close its release group (batched cadence), stop here 
    .venv/Scripts/python .claude/skills/phase-status/scripts/check_coherence.py
    ```
    Also grep the staged diff for secrets (key/secret/token/password/passphrase).
-7. **Commit, tag, push** (base conventions §7 — never add `Co-Authored-By`; keep `.claude/settings.json` staged):
+7. **Integrate, tag, push** (base conventions §7 + §7b — never add `Co-Authored-By`; keep
+   `.claude/settings.json` staged). **A release tag is cut only on `<RELEASE_BRANCH>` (`main`).**
+
+   **`integration = branch` (this repo)** — commit the release on the plan branch, then integrate
+   into `main` and tag *there*:
    ```bash
+   # on the plan branch — commit the release bookkeeping
    git add -A
    git commit -m "release: vX.Y.Z — <theme> (IDs)"
+   # integrate into main (fast-forward keeps history linear, matching this repo's tags)
+   git switch main
+   git merge --ff-only feat/<slug>     # if this FAILS, main diverged (e.g. a hotfix landed):
+                                       #   git switch feat/<slug> && git merge main   # reconcile + re-plan if the version moved
+                                       #   then retry: git switch main && git merge --ff-only feat/<slug>
    git tag vX.Y.Z
-   git push origin <current-branch>
-   git push origin vX.Y.Z          # triggers .github/workflows/release.yml
+   git push origin main
+   git push origin vX.Y.Z              # triggers .github/workflows/release.yml
+   git switch feat/<slug>             # resume the plan (branch == main after a ff)
    ```
+   **`integration = trunk`** — you are already on `<RELEASE_BRANCH>`; commit, `git tag vX.Y.Z`, and
+   `git push origin <RELEASE_BRANCH>` + the tag directly (no plan branch, no merge).
 
 ## Verification checklist
 - [ ] `test_cmd` green before any edit
@@ -73,7 +94,9 @@ If this phase does **not** close its release group (batched cadence), stop here 
 - [ ] `src/ccbalancer/__init__.py` `__version__` == the new version; `pyproject.toml` untouched
 - [ ] `check_coherence.py` exits 0
 - [ ] `PLAN.md` rows for the release are `released`; `PROGRESS.md` `**Current version:**` updated
-- [ ] Commit `release: vX.Y.Z — <theme> (IDs)`, tag `vX.Y.Z`, branch + tag pushed; no `Co-Authored-By`
+- [ ] Release integrated to `<RELEASE_BRANCH>` and the tag `vX.Y.Z` cut **there** (not on the plan
+      branch); `<RELEASE_BRANCH>` HEAD == this release
+- [ ] Commit `release: vX.Y.Z — <theme> (IDs)`, `<RELEASE_BRANCH>` + tag pushed; no `Co-Authored-By`
 
 ## Notes
 - Scripts do the mechanics; you supply judgment/prose (detail bodies, changelog wording, theme, commit message).

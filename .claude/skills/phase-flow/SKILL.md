@@ -18,6 +18,9 @@ it reports, sequences, and moves the `PLAN.md` cursor, delegating mutation to th
 **Conventions hub:** the reusable base lives here in `references/conventions.md`; every `phase-*`
 skill reads it, then applies project overrides from `docs/conventions/tracking.md`.
 
+**Shared library:** the scripts import `tracklib` from the `phase-lib` skill via a uniform bootstrap
+— see `../phase-lib/SKILL.md`.
+
 ## Report first, then act
 1. **Read state** (read-only):
    ```bash
@@ -28,12 +31,12 @@ skill reads it, then applies project overrides from `docs/conventions/tracking.m
    | Situation | Action |
    |---|---|
    | Work is **not a product iteration** (tooling / `.claude/` / meta-docs / CI) | → **chore track**: commit plainly, no `phase-complete` (below) |
-   | No active plan / user approved a plan / "start" | → run **`phase-start`** to scaffold |
+   | No active plan / user approved a plan / "start" | → **branch guard** (branch mode): if on `<RELEASE_BRANCH>`, create the `feat/*` branch first (§7b); then run **`phase-start`** to scaffold |
    | User asks "where/status" | → run **`phase-status`** (report only) |
-   | User wants to finalize/release a worked phase | → run **`phase-complete`** |
+   | User wants to finalize/release a worked phase | → run **`phase-complete`** (release integrates to `<RELEASE_BRANCH>` — §7b) |
    | **NEXT** and the just-worked phase is finalized | → **advance** (below) |
    | **NEXT** but the current phase closes a release group and isn't `released` | → **refuse**; point at `phase-complete` Part B |
-   | All plan rows `released` | → report plan complete; reset `PLAN.md` to the `No active plan.` stub |
+   | All plan rows `released` | → report plan complete; **drain-branch**: the branch is already integrated per release — delete the merged `feat/*` branch + prune any worktree (§7b), then reset `PLAN.md` to the `No active plan.` stub |
 
 ## Release track vs chore track (route before finalizing)
 Before treating any work as a release, apply the decision rule (base conventions §6b):
@@ -75,7 +78,24 @@ work both → phase-complete (Part A twice, Part B once) → v0.5.0 (F-4 inherit
 NEXT → no phases left → plan complete → reset PLAN.md
 ```
 
+## Branch & concurrency (§7b — `integration = branch`, `concurrency = hybrid`)
+- **Plan-start branch guard:** a plan never starts on `<RELEASE_BRANCH>`. If on it, create the
+  plan's `feat/*` branch first (or a worktree for a parallel session) — `phase-start`'s scaffold
+  refuses on `<RELEASE_BRANCH>`.
+- **Release = integration:** each `phase-complete` Part B integrates the finished phase(s) into
+  `<RELEASE_BRANCH>` and tags there (`main` stays the released truth). So by plan-complete the branch
+  is already drained → delete it + prune any worktree, then reset `PLAN.md`.
+- **Mid-plan hotfix** (a bug that can't wait for the plan): don't derail the plan branch. Isolate the
+  fix on `<RELEASE_BRANCH>` in a **worktree** so the plan's working tree stays put, release it there,
+  then the plan branch pulls `<RELEASE_BRANCH>` to absorb the fix (re-plan between phases if the
+  version moved). Layout-agnostic — `git worktree add <path> <branch>` works on the current flat repo
+  today; each worktree needs its own venv (see `tracking.md`). For the worktree/merge/cleanup
+  mechanics use `superpowers:using-git-worktrees` / `finishing-a-development-branch` when available;
+  otherwise the runbook here is self-contained.
+
 ## Notes
-- This skill routes and sequences; it does not stamp files or run git. Only `phase-complete` does.
+- This skill routes and sequences; its **scripts** never run git (`order.py` only parses `PLAN.md`).
+  Release git (commit/tag/push/integrate) is `phase-complete`; branch-create and the plan-complete
+  drain/prune are short runbook steps the model runs — never a script (§7b).
 - Direct use of `phase-start` / `phase-status` / `phase-complete` is fine; the orchestrator is a
   convenience entry point, not a mandatory chokepoint.

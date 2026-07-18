@@ -7,6 +7,10 @@ files**, or resolves a path to them. It owns *where* files live and *how* a path
 discovered. For non-secret value resolution see [04-no-hardcoding.md](04-no-hardcoding.md);
 for secrets see [13-credentials.md](13-credentials.md).
 
+This rule does **not** apply to skills — a skill owns no per-user `~/.<tool>/` base dir. A skill's
+scripts read/write within the skill directory, from passed arguments, or a scratch/temp dir. See
+[15-skills.md](15-skills.md).
+
 ## Canonical Base Dir (Invariant)
 
 - All per-user config and data live under a **single base dir**, `~/.<tool>/` (the

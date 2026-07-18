@@ -19,6 +19,13 @@ version_dynamic = true
 test_cmd = ".venv/Scripts/python -m pytest tests/ -v"
 test_cmd_quiet = ".venv/Scripts/python -m pytest tests/ -q"
 
+# Branch / integration / concurrency policy (base conventions §7b). This repo: each plan runs on
+# its own feat/* branch; the release IS the integration (merge to main, tag on main, branch pulls
+# main back); worktrees on demand for hotfixes / parallel sessions.
+release_branch = "main"
+integration = "branch"
+concurrency = "hybrid"
+
 [paths]
 progress = "docs/PROGRESS.md"
 plan = "docs/PLAN.md"
@@ -50,6 +57,40 @@ fixes_dir = "docs/fixes"
 - **RELEASE.md** is the internal release→phases index (revived); `CHANGELOG.md` is the public record.
 - **`docs/RELEASE.md`** historically used `## X.Y.Z - date` prose notes; the revived form is the
   index table `| Release | Date | Phases | Theme |`.
+
+## Branch & integration (base conventions §7b)
+
+- **Model:** `integration = "branch"` — each plan on its own `feat/*` branch; **the release is the
+  integration**. Part A finalizes the phase on the branch; Part B switches to `main`, merges/FFs the
+  finished phase(s), tags `vX.Y.Z` on `main`, pushes `main` + tag, then the plan branch pulls `main`
+  back (absorbing the version bump + CHANGELOG roll). Every release tag lands on `main` — matching
+  this repo's whole history (v0.1.x–v0.2.0 were all cut on the main line).
+- **Guards:** never start a plan on `main` (branch first — `scaffold.py` refuses on `main`); never
+  cut a release off `main`; at plan-complete the branch is drained → delete it + prune any worktree.
+- **Concurrency = `hybrid`:** normal plans run on a branch in the **one** working dir (shared
+  `.venv`); reach for a worktree only for a mid-plan hotfix or genuinely parallel sessions. Each new
+  worktree needs its **own** venv (the editable install points at that worktree's `src/`):
+  `py -3.11 -m venv .venv` then `.venv/Scripts/python -m pip install -e ".[dev]"` inside it.
+
+## Worktree layout (preferred — documented, not yet adopted)
+
+The intended permanent structure is a **bare repo + sibling worktrees** — but the repo is **still a
+normal flat repo today**; plain `git worktree add ../<name> <branch>` works now with no migration,
+and the phase-* skills run unchanged inside any worktree (`.claude/` is tracked, so it's checked out
+per worktree). Target layout:
+
+```
+py-cc-balancer/          # container (no code, no top-level .git/)
+├── .bare/               # the repository (HEAD, config, objects/, refs/, worktrees/)
+├── main/                # worktree for main   (holds a .git *file* → gitdir: ../.bare/worktrees/main)
+└── feat-x/              # worktree for a feature branch
+```
+
+Under this layout **Claude Code runs inside a worktree dir** (`py-cc-balancer/main/`,
+`py-cc-balancer/feat-x/`) — never the container root, which holds only `.bare/` + worktree folders.
+Adopting it is a deliberate one-time migration (relocates `<project>/` → `<project>/main/`, resets
+`.venv`/IDE paths) — run it as its own approved plan from a fresh session, then flip this note to
+*adopted*.
 
 ## Commit / trailers
 

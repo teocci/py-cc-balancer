@@ -50,12 +50,15 @@ carry a bigger phase than a 250K model. When decomposing:
 | Scaffold | `phase-start` | docs only | Allocate ids, create detail stubs, index rows, write `<PLAN>` |
 | Observe | `phase-status` | no | Report state + coherence; surface drift |
 | Finalize a phase | `phase-complete` (A) | docs | Fill details, mark done, accrue `<CHANGELOG>` Unreleased |
-| Cut a release | `phase-complete` (B) | docs + git | Bump version, roll changelog, index release, commit/tag/push |
-| Advance (NEXT) | `phase-flow` | `<PLAN>` cursor | Pick next unblocked phase(s); guard release boundaries |
+| Cut a release | `phase-complete` (B) | docs + git | Bump version, roll changelog, index release; **integrate to `<RELEASE_BRANCH>` (branch mode)**, commit/tag/push there |
+| Advance (NEXT) | `phase-flow` | `<PLAN>` cursor | Pick next unblocked phase(s); guard release boundaries; at plan-complete, drain/delete the branch (§7b) |
 
 **Boundaries:** `phase-start` never bumps/commits. `phase-status` never mutates.
 `phase-flow` never edits detail/index files — it routes and moves the cursor. Only
-`phase-complete` bumps the version, touches `<CHANGELOG>` version sections, or runs git.
+`phase-complete` bumps the version, touches `<CHANGELOG>` version sections, or runs git. **Branch,
+integration & concurrency policy is §7b** — the three guards (branch-off at plan-start, on-
+`<RELEASE_BRANCH>` at release, drain-branch at plan-complete) live there; scripts only *detect*
+branch state, runbooks *act*.
 
 ## 4. Division of labor: scripts vs model
 
@@ -187,8 +190,56 @@ stays green across them — the two tracks do not interfere.
 - Other commits: Conventional Commits with an id scope where relevant
   (`fix(F-3): …`, `feat: Phase 12 — …`, `docs(...): …`).
 - **Never** add `Co-Authored-By` or other AI trailers.
-- Releases are **tag-driven**: after the release commit, `git tag vX.Y.Z` and push the current
-  branch + the tag. Pushing the tag is what triggers the release workflow.
+- Releases are **tag-driven**: after the release commit, `git tag vX.Y.Z` and push
+  `<RELEASE_BRANCH>` + the tag. Pushing the tag is what triggers the release workflow. **Where the
+  tag is cut** (directly, or after integrating a plan branch) is set by `integration` — see §7b.
+
+## 7b. Branch, integration & concurrency model
+
+Where commits and release tags land, and if/when a feature branch merges to the mainline, is a
+**per-project policy** — not something the skills should assume silently. Three bindings encode it;
+`tracking.md` sets the values (defaults: `release_branch = main`, `integration = trunk`,
+`concurrency = single`). The **invariant every mode preserves:** `<RELEASE_BRANCH>` HEAD is the
+**latest released truth** — a release tag is always cut on `<RELEASE_BRANCH>`.
+
+### `integration` — how work reaches `<RELEASE_BRANCH>`
+- **`trunk`** — commit and release directly on `<RELEASE_BRANCH>`; use short-lived branches only for
+  risky work and merge them **before** releasing. Simplest; one line of development.
+- **`branch`** — each plan runs on its own `feat/*` branch (recorded in `<PLAN>` `Branch:`).
+  **The release *is* the integration:** to cut a release you switch to `<RELEASE_BRANCH>`, merge/FF
+  the finished phase(s), tag there, push, **then the plan branch pulls `<RELEASE_BRANCH>` back**
+  (to absorb its own version bump + `<CHANGELOG>` roll). This is continuous integration — merge
+  little and often, keeping the branch short-lived; it is *not* "hoard tags on the branch, merge at
+  the end" (a long-lived branch accrues integration debt).
+
+### `concurrency` — how to have more than one thing checked out at once
+- **`single`** — one working dir; `git switch` between branches (only one live at a time).
+- **`worktree`** — every branch is its own `git worktree` (separate working dir sharing one repo).
+- **`hybrid`** *(recommended when `integration = branch`)* — normal plans run on a branch in the
+  **one** working dir; escalate to a worktree **on demand** for the two cases that need two things
+  live at once: a **mid-plan hotfix** and **genuinely parallel phases** in separate sessions.
+- **Python caveat (any worktree):** a worktree is a separate directory, so an editable install
+  (`pip install -e`) points at *that worktree's* source. Each worktree needs its **own** venv +
+  editable install, or code runs against the wrong tree. This is why worktrees are on-demand, not
+  free — `tracking.md` states the concrete setup command.
+
+### The three guards (portable; scripts only *detect*, runbooks *act*)
+1. **plan-start** — never scaffold a plan while on `<RELEASE_BRANCH>` (in `branch` mode): create the
+   plan's `feat/*` branch first and record it in `<PLAN>` `Branch:`. This is what makes parallel
+   sessions safe. `phase-start`'s script refuses with an actionable message; the model creates the
+   branch (or worktree).
+2. **release (Part B)** — must be on `<RELEASE_BRANCH>` to tag. In `branch` mode Part B integrates
+   first (merge/FF the plan branch → `<RELEASE_BRANCH>`), then tags there.
+3. **plan-complete** — by per-release integration the branch is already drained into
+   `<RELEASE_BRANCH>` when the last row goes `released`; delete the merged branch and prune any
+   worktree **before** resetting `<PLAN>` to the stub.
+
+### Mid-plan hotfix pattern (`integration = branch`)
+A bug found deep in a plan does **not** wait for the plan to finish: isolate it on
+`<RELEASE_BRANCH>` (a worktree keeps the plan's work untouched in its own dir), fix + release it
+there, then the plan branch pulls `<RELEASE_BRANCH>` to absorb the fix — re-planning between phases
+if the version shifted. Git *mutation* here (worktree add/remove, merge, tag) is a runbook the model
+runs; the scripts stay read-only.
 
 ## 8. Version bump mechanics
 
@@ -206,6 +257,11 @@ stays green across them — the two tracks do not interfere.
 - **No secrets in the diff** (grep for key/secret/token/password/passphrase patterns).
 - **No premature advance:** `phase-flow` refuses NEXT past a phase that closes a release group but
   isn't `released` yet.
+- **Release on `<RELEASE_BRANCH>` (§7b):** a release tag is cut only on `<RELEASE_BRANCH>`; in
+  `branch` mode Part B integrates first. `<RELEASE_BRANCH>` HEAD == latest release is an invariant
+  (`check_coherence.py` asserts it when run on `<RELEASE_BRANCH>`).
+- **No plan on `<RELEASE_BRANCH>` (branch mode):** `phase-start` refuses to scaffold onto
+  `<RELEASE_BRANCH>` — branch first.
 
 ## Project bindings (`tracking.md` must define)
 
@@ -214,6 +270,9 @@ stays green across them — the two tracks do not interfere.
 | `<PACKAGE>` | Import/package name |
 | `<VERSION_FILE>` / `<VERSION_ATTR>` | Where `__version__` lives; the attribute path |
 | `<TEST_CMD>` | Command that runs the suite |
+| `<RELEASE_BRANCH>` | Branch a release tag is cut on (default `main`) |
+| `integration` | `trunk` \| `branch` — how work reaches `<RELEASE_BRANCH>` (§7b; default `trunk`) |
+| `concurrency` | `single` \| `worktree` \| `hybrid` — multiple checkouts at once (§7b; default `single`) |
 | `<PROGRESS>` `<PLAN>` `<RELEASE_INDEX>` `<CHANGELOG>` `<IMPROVEMENTS>` `<FIXES>` | Concrete file paths |
 | detail dirs | `phases/`, `improvements/`, `fixes/` locations |
 | overrides | any format deviation or extra rule specific to the project |

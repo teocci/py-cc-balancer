@@ -18,6 +18,9 @@ the stub bodies.
 **Read first:** base conventions `../phase-flow/references/conventions.md` and project overrides
 `docs/conventions/tracking.md` (the hierarchy, phase-sizing heuristic, and templates).
 
+**Shared library:** the scripts import `tracklib` from the `phase-lib` skill via a uniform bootstrap
+— see `../phase-lib/SKILL.md`.
+
 ## Steps
 1. **Assemble the plan spec** from the approved plan. Decompose the work into
    **context-window-sized phases** (conventions §2), each bundling one or a few items. Capture
@@ -34,15 +37,24 @@ the stub bodies.
    }
    ```
    `depends` entries are 0-based indices into this spec's `phases` array.
-2. **Run the scaffold** (writes stubs + index rows + `PLAN.md`; allocates next-free ids):
+2. **Branch guard** (`integration = branch`; conventions §7b guard 1) — a plan never starts on
+   `<RELEASE_BRANCH>`. If HEAD is the release branch, create the plan branch first (and record it as
+   the spec `branch`):
+   ```bash
+   git switch -c feat/<slug>          # or, for a parallel session: git worktree add ../<slug> -b feat/<slug> main
+   ```
+   `scaffold.py` **refuses** (exit 2, structured error) if run on `<RELEASE_BRANCH>` in `branch`
+   mode — it never creates the branch itself (that's this runbook step). In `trunk` mode there is no
+   guard. Each new worktree needs its own venv (see `tracking.md`).
+3. **Run the scaffold** (writes stubs + index rows + `PLAN.md`; allocates next-free ids):
    ```bash
    .venv/Scripts/python .claude/skills/phase-start/scripts/scaffold.py --spec <spec.json>
    ```
    Preview first with `--dry-run` to see the ids and files it will create.
-3. **Fill the stub bodies** — for each created detail file, write the Objective/Approach (or
+4. **Fill the stub bodies** — for each created detail file, write the Objective/Approach (or
    Symptom) from the plan. Leave frontmatter `Status: 🚧 IN PROGRESS` / `Version: (pending)`;
    `phase-complete` stamps those at finalize/release.
-4. **Report** the scaffolded phases and which are unblocked to start (run `phase-flow`'s
+5. **Report** the scaffolded phases and which are unblocked to start (run `phase-flow`'s
    `order.py --suggest` for the execution order). **Do not** commit, bump the version, or touch
    `CHANGELOG.md` — scaffolding is docs-only.
 
@@ -50,7 +62,9 @@ the stub bodies.
 - [ ] `PLAN.md` lists every phase with items, `Depends`, `Release`, and `pending` status
 - [ ] Each phase/item has a detail stub and an in-progress index row
 - [ ] `PROGRESS.md` phase table gained a `planned` row per phase
-- [ ] No version bump, no `CHANGELOG.md` edit, no git actions
+- [ ] Not on `<RELEASE_BRANCH>` in `branch` mode (plan branch created first — a manual pre-step)
+- [ ] `scaffold.py` did no version bump, no `CHANGELOG.md` edit, no git (docs-only; the script never
+      creates the branch)
 
 ## Notes
 - Ids are allocated next-free by scanning the indexes; never reuse an id.

@@ -13,8 +13,9 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _tracklib as tl  # noqa: E402
+# skill scripts live at .claude/skills/<skill>/scripts/ -> parents[2] is the shared skills/ dir
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'phase-lib' / 'scripts'))
+import tracklib as tl  # noqa: E402
 
 
 def build_report() -> dict:
@@ -25,9 +26,18 @@ def build_report() -> dict:
     unreleased = tl.changelog_unreleased(changelog)
     porcelain = tl.git_porcelain(root)
 
+    branch = tl.git_branch(root)
+    release_branch = cfg.get('release_branch', 'main')
+    ab = tl.git_ahead_behind(root, release_branch)  # None when on/unknown base
+
     report = {
         'version': version,
-        'branch': tl.git_branch(root),
+        'branch': branch,
+        'release_branch': release_branch,
+        'ahead': ab[0] if ab else None,
+        'behind': ab[1] if ab else None,
+        # unmerged plan work sitting off the release branch — the drift this whole policy guards
+        'branch_drift': bool(ab and branch != release_branch and ab[0] > 0),
         'uncommitted': len(porcelain),
         'uncommitted_sample': porcelain[:10],
         'unreleased_bullets': len(unreleased),
@@ -63,6 +73,9 @@ def build_report() -> dict:
 
 def render_text(r: dict) -> str:
     out = [f"version: {r['version']}   branch: {r['branch']}"]
+    if r['branch'] != r.get('release_branch') and r.get('ahead') is not None:
+        drift = ' — UNMERGED' if r.get('branch_drift') else ''
+        out.append(f"vs {r['release_branch']}: {r['ahead']} ahead, {r['behind']} behind{drift}")
     if not r['plan_active']:
         out.append('plan: none active')
     else:

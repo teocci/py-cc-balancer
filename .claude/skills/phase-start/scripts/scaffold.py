@@ -26,8 +26,9 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _tracklib as tl  # noqa: E402
+# skill scripts live at .claude/skills/<skill>/scripts/ -> parents[2] is the shared skills/ dir
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'phase-lib' / 'scripts'))
+import tracklib as tl  # noqa: E402
 
 
 def _max_id(text: str, prefix: str) -> int:
@@ -85,8 +86,28 @@ def build_plan_md(meta: dict, rows: list[dict]) -> str:
     return head + '\n'.join(tbl) + '\n'
 
 
+def _branch_guard(root: Path, cfg: dict) -> str | None:
+    '''Refuse-message if scaffolding on the release branch under integration=branch, else None.
+
+    Read-only (never creates a branch — that's a runbook step). See conventions §7b guard 1.
+    '''
+    if cfg.get('integration') != 'branch':
+        return None
+    rb = cfg.get('release_branch', 'main')
+    cur = tl.git_branch(root)
+    if cur and cur == rb:
+        return (f"on release branch '{rb}' with integration=branch — refuse to scaffold a plan here. "
+                f"Create the plan branch first (git switch -c feat/<slug>, or a worktree for a "
+                f"parallel session), then re-run scaffold.")
+    return None
+
+
 def scaffold(spec: dict, dry_run: bool) -> dict:
     root, cfg = tl.load()
+    guard = _branch_guard(root, cfg)
+    if guard and not dry_run:
+        print(json.dumps({'error': guard, 'branch': tl.git_branch(root)}), file=sys.stderr)
+        raise SystemExit(2)
     P = lambda k: tl.path_for(root, cfg, k)  # noqa: E731
 
     progress = tl.read(P('progress'))
@@ -151,7 +172,7 @@ def scaffold(spec: dict, dry_run: bool) -> dict:
         for path, content in edits.items():
             tl.write(Path(path), content)
 
-    return {
+    result = {
         'phases': planned,
         'improvements': [r for r in imp_rows],
         'fixes': [r for r in fix_rows],
@@ -160,6 +181,9 @@ def scaffold(spec: dict, dry_run: bool) -> dict:
                          if str(P(k)) in edits],
         'dry_run': dry_run,
     }
+    if guard:  # dry-run only reaches here; surface the branch warning without blocking the preview
+        result['warning'] = guard
+    return result
 
 
 def main() -> int:

@@ -24,8 +24,9 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _tracklib as tl  # noqa: E402
+# skill scripts live at .claude/skills/<skill>/scripts/ -> parents[2] is the shared skills/ dir
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'phase-lib' / 'scripts'))
+import tracklib as tl  # noqa: E402
 
 
 def _stamp_detail(text: str, version: str, date: str, tests: int) -> str:

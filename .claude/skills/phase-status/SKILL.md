@@ -17,6 +17,9 @@ and callable any time. **Mutates nothing.**
 **Read first (only if acting on findings):** base conventions `../phase-flow/references/conventions.md`
 and `docs/conventions/tracking.md`.
 
+**Shared library:** the scripts import `tracklib` from the `phase-lib` skill via a uniform bootstrap
+— see `../phase-lib/SKILL.md`.
+
 ## Steps
 1. **Status report** — plan cursor, per-phase status, unblocked/parallelizable next phases,
    uncommitted files, `[Unreleased]` bullet count, current version:
@@ -36,7 +39,12 @@ and `docs/conventions/tracking.md`.
 ## What the coherence check asserts
 `__version__` is semver · `pyproject.toml` has no literal `version=` (dynamic intact) · top
 `CHANGELOG` `## [X.Y.Z]` == `__version__` · `RELEASE.md` top row == `__version__` · every detail
-file stamped with the current version is `✅ DONE`.
+file stamped with the current version is `✅ DONE` · **when on `<RELEASE_BRANCH>`**, the latest
+reachable tag == `v__version__` (the released-truth invariant, §7b; skipped off the release branch).
+
+`status.py` also reports **branch drift** — when HEAD is off `<RELEASE_BRANCH>`, its ahead/behind
+count (an `UNMERGED` marker when the branch has un-integrated commits). This is the report that
+surfaces unmerged plan work.
 
 ## Notes
 - No active plan → `status.py` reports `plan: none active`; that's expected between plans.

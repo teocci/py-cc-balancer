@@ -2,6 +2,13 @@
 
 Simple is better than complex. Flat is better than nested. Practicality beats purity.
 
+## Applies When
+
+This layout is for **Python repos/packages**. It does **not** apply to skills — a skill is not a
+`src/mypackage/` package but `<skill>/SKILL.md` + `scripts/` (+ an optional `requirements.txt`).
+Don't scaffold `src/`, `stores/`, `managers/`, or `pyproject.toml` for a skill. See
+[15-skills.md](15-skills.md).
+
 ## Standard Directory Layout
 
 ```

@@ -1,8 +1,10 @@
 '''Shared helpers for the phase-* skill scripts (project-agnostic).
 
 Reads project bindings from ``docs/conventions/tracking.md`` (a fenced ``toml`` block) and
-provides parsing/IO utilities for the tracking files. Self-contained on purpose: each skill
-carries its own copy so a single skill directory is portable to another project.
+provides parsing/IO utilities for the tracking files. This is the phase-* family's single shared
+library: it lives once here in the ``phase-lib`` skill and every ``phase-*`` script imports it via
+the uniform bootstrap (see any consumer, e.g. ``phase-flow/scripts/order.py``). The unit of
+portability is the family — ``phase-lib`` travels with its consumers — not one skill directory.
 '''
 
 from __future__ import annotations
@@ -20,6 +22,13 @@ DEFAULTS = {
     'version_attr': '__version__',
     'version_dynamic': False,
     'test_cmd': 'pytest',
+    # Branch / integration / concurrency policy (base defaults; tracking.md overrides — see
+    # conventions §7b). 'trunk' + 'single' is the safest zero-config default: commit and release
+    # on the release branch, one working dir. A repo using feature branches sets integration =
+    # 'branch' and (optionally) concurrency = 'hybrid'/'worktree'.
+    'release_branch': 'main',
+    'integration': 'trunk',
+    'concurrency': 'single',
     'paths': {
         'progress': 'docs/PROGRESS.md',
         'plan': 'docs/PLAN.md',
@@ -257,3 +266,31 @@ def git_branch(root: Path) -> str:
         ).stdout.strip()
     except Exception:
         return ''
+
+
+def git_latest_tag(root: Path) -> str:
+    '''Most recent tag reachable from HEAD (git describe --tags --abbrev=0), '' if none. Read-only.'''
+    try:
+        return subprocess.run(
+            ['git', '-C', str(root), 'describe', '--tags', '--abbrev=0'],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+    except Exception:
+        return ''
+
+
+def git_ahead_behind(root: Path, base: str) -> tuple[int, int] | None:
+    '''(ahead, behind) of HEAD vs *base*, or None if base is unknown/unreachable.
+
+    Read-only. ``ahead`` = commits on HEAD not on *base* (need integrating); ``behind`` =
+    commits on *base* not on HEAD (need pulling). Returns (0, 0) when HEAD is *base* itself.
+    '''
+    try:
+        out = subprocess.run(
+            ['git', '-C', str(root), 'rev-list', '--left-right', '--count', f'{base}...HEAD'],
+            capture_output=True, text=True, check=True,
+        ).stdout.split()
+        behind, ahead = int(out[0]), int(out[1])
+        return ahead, behind
+    except Exception:
+        return None

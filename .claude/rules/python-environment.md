@@ -1,5 +1,19 @@
 # Python Environment Rules
 
+## Scope (Skills & Non-Python Projects)
+
+These rules govern **every** Python invocation — including a skill's `scripts/` — even when the host
+project is Go, a docs/video/TTS project, or otherwise non-Python. If a skill runs Python, create and
+use a `.venv` **first**; never the system interpreter. See [15-skills.md](15-skills.md) for how the
+other rules apply to skills.
+
+- **Venv location:** the host project root `.venv/` (shared). A standalone/personal skill with no
+  host project → the skill's own directory is the root.
+- **Gitignore:** ensure `.venv/` and `__pycache__/` are gitignored; **add a `.gitignore` if none
+  exists**. This matters most when the host root is non-Python and has no Python `.gitignore` yet.
+- **Deps:** prefer declaring a skill's dependencies in `<skill>/requirements.txt` and installing
+  with `$VENV/pip install -r <skill>/requirements.txt` (see the venv-path resolution below).
+
 ## Required Python Version
 
 - **Windows:** Python 3.11.9

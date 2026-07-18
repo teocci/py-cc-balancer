@@ -14,8 +14,9 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _tracklib as tl  # noqa: E402
+# skill scripts live at .claude/skills/<skill>/scripts/ -> parents[2] is the shared skills/ dir
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'phase-lib' / 'scripts'))
+import tracklib as tl  # noqa: E402
 
 
 def _detail_files_for_version(root: Path, cfg: dict, version: str) -> list[Path]:
@@ -58,6 +59,17 @@ def run_checks() -> list[tuple[bool, str]]:
                  if '✅ DONE' not in f.read_text(encoding='utf-8')]
         results.append((not stale, f'all v{version} detail files are ✅ DONE'
                         + (f' (stale: {stale})' if stale else '')))
+
+    # Invariant: <RELEASE_BRANCH> HEAD == latest release (conventions §7b). Only assertable when
+    # actually on the release branch — off it (e.g. Part B runs the gate on the plan branch first)
+    # this is skipped, so it never false-fails the pre-integration coherence gate.
+    branch = tl.git_branch(root)
+    release_branch = cfg.get('release_branch', 'main')
+    if version and branch and branch == release_branch:
+        tag = tl.git_latest_tag(root)
+        results.append((tag in (version, f'v{version}'),
+                        f'on {release_branch}: latest reachable tag {tag!r} == v{version} '
+                        f'({release_branch} is the released truth)'))
     return results
 
 

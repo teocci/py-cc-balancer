@@ -6,6 +6,12 @@ This rule applies **only to tools that authenticate to an external API or servic
 behalf** — a CEX client, a cloud provider, a GitHub-style API. If the tool needs no credentials,
 this rule does not apply; manage ordinary settings per [04-no-hardcoding.md](04-no-hardcoding.md).
 
+**Skills are not CLI tools.** A skill needing an API key (e.g. a Gemini TTS skill) does **not**
+implement the `auth login/logout/list/status` subcommands or a keyring lifecycle — that
+architecture is for the host CLI tool, not a skill script. For skills, only the **Invariants**
+below apply: read secrets from env-vars or the OS keyring, never hardcode/commit/log them, and mask
+in output. See [15-skills.md](15-skills.md).
+
 ## Credentials Live Behind `<tool> auth` Subcommands
 
 Model the `gh` CLI. Do **not** make the user hand-edit a `.env` or config file to authenticate.
