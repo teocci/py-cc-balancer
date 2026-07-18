@@ -144,7 +144,8 @@
       "Bash(set +e)",
       "Bash(git ls-tree *)",
       "Bash(git rev-list *)",
-      "Bash(git switch *)"
+      "Bash(git switch *)",
+      "Bash(git branch *)"
     ],
     "additionalDirectories": [
       "d:\\teocci\\code\\python\\py-cc-balancer\\dist\\ccbalancer",
