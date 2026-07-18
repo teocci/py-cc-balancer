@@ -1,7 +1,6 @@
 # Active Plan
 
-**Approved:** 2026-07-19  **Branch:** fix/f-6-exec-reconciliation  **Cadence:** per-phase
+No active plan.
 
-| Phase | Items | Depends | Release | Version | Status |
-|-------|-------|---------|---------|---------|--------|
-| P-22 | F-6 | — | R1 | 0.5.1 | released |
+The last plan (P-22 / F-6 — live order-status reconciliation) shipped in **v0.5.1**. To scaffold the
+next one, invoke `phase-flow` (or `phase-start`) after a plan is approved.
